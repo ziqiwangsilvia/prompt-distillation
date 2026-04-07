@@ -12,9 +12,10 @@ from vllm import LLM as vLLM
 
 from core import DATA_PATH
 from core.file_naming import generate_augmented_filename, generate_lesson_filename, generate_exam_filename
-from core.llm import LLM
+from core.llm import LLM, get_model_family
 from core.messages import Message, Role, merge_messages
-from core.model_configs import create_model_flags, MODEL_CONFIGS
+from core.model_configs import create_model_flags, MODEL_CONFIGS, get_model_config
+from core.tool_call_format import convert_tool_call_format
 from core.utils import generate_sampling_params
 from curriculum.lesson import read_lessons, Lesson, Exercise
 from curriculum.exercise_with_answers import ExerciseWithAnswers, Choice, xml_dump
@@ -56,18 +57,25 @@ def generate_prompt(
     return prompts, exercises
 
 
-def process_answers(llm: LLM, exercise: Exercise, answers: List[str]) -> ExerciseWithAnswers:
-    """Process answers for an exercise."""
+def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
+                    source_family: str = "", target_family: str = "") -> ExerciseWithAnswers:
+    """Process answers for an exercise, optionally converting tool-call format."""
     answer_choices = []
 
     for answer in answers:
         if not isinstance(answer, str):
             answer = answer.text
 
+        if source_family and target_family and source_family != target_family:
+            answer = convert_tool_call_format(answer, source_family, target_family)
+
         tokens = llm.tokenize(answer)
         terminators = llm.get_terminators()
         truncated = bool(tokens[0, -1] not in terminators)
-        answer = llm.decode(tokens[:, :-1])
+        if truncated:
+            answer = llm.decode(tokens)
+        else:
+            answer = llm.decode(tokens[:, :-1])
         choice = Choice(answer, truncated)
         answer_choices.append(choice)
 
@@ -119,6 +127,7 @@ def setup_models(base: str, vllm_hostname: str = "") -> Tuple[LLM, object]:
 
 def main(
     base: str = "llama3-8b-instruct",
+    student_base: str = "",
     generate_lesson: bool = False,
     generate_exam: bool = False,
     lesson_num_choices: int = 1,
@@ -221,9 +230,11 @@ def main(
     assert len(answers[0]) == num_choices
 
     # Process answers
+    teacher_family = get_model_family(get_model_config(base).vllm_model)
+    student_family = get_model_family(get_model_config(student_base).vllm_model) if student_base else teacher_family
     exercises_with_answers = []
     for ex, ans in zip(exercises, answers):
-        exercises_with_answers.append(process_answers(llm, ex, ans))
+        exercises_with_answers.append(process_answers(llm, ex, ans, teacher_family, student_family))
 
     assert len(exercises_with_answers) == len(exercises)
 

@@ -33,6 +33,13 @@ MODEL_CONFIGS = {
         flag_name="qwen25_3b",
         lora_targets=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"],
     ),
+    "qwen2.5-7b-instruct": ModelConfig(
+        name="qwen2.5-7b-instruct",
+        vllm_model="Qwen/Qwen2.5-7B-Instruct",
+        system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+        flag_name="qwen25_7b",
+        lora_targets=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"],
+    ),
     "qwen2.5-14b-instruct": ModelConfig(
         name="qwen2.5-14b-instruct",
         vllm_model="Qwen/Qwen2.5-14B-Instruct",
