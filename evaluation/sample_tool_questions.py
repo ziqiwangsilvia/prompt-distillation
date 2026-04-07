@@ -137,6 +137,10 @@ def _generate_and_write(label, output_file, t_batches, n_batches, needed_calls,
                 seen.add(q_clean)
                 unique.append(q_clean)
 
+    if not unique:
+        print(f"WARNING: No {label} questions generated — not writing empty file.", flush=True)
+        return
+
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f, delimiter=";")
         for q in unique:

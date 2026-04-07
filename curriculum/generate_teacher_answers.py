@@ -99,6 +99,7 @@ def save_to_xml(lesson_id: str, exercises_with_answers: List[ExerciseWithAnswers
 
     fname = generate_augmented_filename(lesson_id, n_choices, temperature, model_flags)
     path = DATA_PATH / fname
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w") as file:
         xml_dump(root, file)

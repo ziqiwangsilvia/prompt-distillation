@@ -106,6 +106,7 @@ def main(
 ) -> None:
     """Create an XML file for exam questions."""
     output_dir = generate_exam_filename(dataset_family, dataset, variant, max_items)
+    os.makedirs(os.path.dirname(output_dir), exist_ok=True)
     if os.path.exists(output_dir):
         print(f"{output_dir} already exists — skipping.")
         return

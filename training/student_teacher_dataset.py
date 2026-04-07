@@ -11,7 +11,6 @@ from typing import List, Dict, Any, Optional
 from core import DATA_PATH
 from core.messages import Role, QUESTION_PLACEHOLDER
 from curriculum.exercise_with_answers import ExerciseWithAnswers
-from curriculum.generate_distractor import build_distractor_dataset
 from training import IGNORE_INDEX
 from training.utils import tokenize, read_exercises, ensure_path_exists, extract_question, extract_material_and_question
 

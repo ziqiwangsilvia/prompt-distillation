@@ -60,7 +60,7 @@ def main(
     save_during_training: bool = False,
     checkpoint_interval: int = 0,
     checkpoint_interval_seconds: int = 0,
-    datapath: Path = Path("data"),
+    datapath: Path = Path("output/teacher_answers"),
     # question generating model
     question_model: str = "llama3-8b-instruct",
     question_temperature: float = 1.5,
@@ -81,7 +81,7 @@ def main(
 ):
     if seed:
         set_seed(seed)
-    project_path = BASE_PATH / "checkpoints" / project_name
+    project_path = BASE_PATH / "output" / "checkpoints"
 
     # Train lesson
     base_lesson_id = generate_lesson_name(

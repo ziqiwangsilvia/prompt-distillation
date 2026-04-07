@@ -89,7 +89,7 @@ python3 evaluation/sample_tool_questions.py \
     --nlp_batches "${NLP_BATCHES}"
 
 # Step 2: Convert generated questions into lesson format
-echo "[2/8] Converting questions to lesson format..."
+echo "[2/6] Converting questions to lesson format..."
 python3 curriculum/csv_to_lesson.py \
     --dataset_family "${DATASET_FAMILY}" \
     --dataset "${DATASET}" \
@@ -98,7 +98,7 @@ python3 curriculum/csv_to_lesson.py \
     --train_questions "${MAX_TRAIN_ITEMS}"
 
 # Step 3: Generate exam from eval questions
-echo "[3/8] Generating exam..."
+echo "[3/6] Generating exam..."
 python3 curriculum/questions_to_exam.py \
     --dataset_family "${DATASET_FAMILY}" \
     --dataset "${DATASET}" \
@@ -108,7 +108,7 @@ python3 curriculum/questions_to_exam.py \
     --max_train_items "${MAX_TRAIN_ITEMS}"
 
 # Step 4: Generate teacher answers (lesson)
-echo "[4/8] Generating teacher answers (lesson)..."
+echo "[4/6] Generating teacher answers (lesson)..."
 python3 curriculum/generate_teacher_answers.py \
     --generate_lesson True \
     --base "${TEACHER_BASE}" \
@@ -123,7 +123,7 @@ python3 curriculum/generate_teacher_answers.py \
     --vllm_hostname "${VLLM_HOST}"
 
 # Step 5: Generate teacher answers (exam)
-echo "[5/8] Generating teacher answers (exam)..."
+echo "[5/6] Generating teacher answers (exam)..."
 python3 curriculum/generate_teacher_answers.py \
     --generate_exam True \
     --base "${TEACHER_BASE}" \
@@ -135,8 +135,8 @@ python3 curriculum/generate_teacher_answers.py \
     --vllm_hostname "${VLLM_HOST}"
 
 # Step 6: Run training on TRAIN_GPU
-echo "[6/8] Training on GPU ${TRAIN_GPU}..."
-CHECKPOINT_DIR="checkpoints/huggingface/${RUN_NAME}"
+echo "[6/6] Training on GPU ${TRAIN_GPU}..."
+CHECKPOINT_DIR="output/checkpoints/${RUN_NAME}"
 if [ -f "${CHECKPOINT_DIR}/adapter_model.safetensors" ]; then
     echo "${CHECKPOINT_DIR}/adapter_model.safetensors already exists — skipping."
 else
@@ -159,13 +159,5 @@ else
     CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/run_train_student.py "${TRAIN_ARGS[@]}"
 fi
 
-# Step 7: Evaluate on TRAIN_GPU
-echo "[7/8] Evaluating..."
-echo "Skipping — evaluate.py does not yet support dataset_family=${DATASET_FAMILY}."
-echo "The trained adapter is at: checkpoints/huggingface/${RUN_NAME}"
-
-# Step 8: Grade
-echo "[8/8] Grading..."
-echo "Skipping — grading not yet supported for ${DATASET_FAMILY}."
-
 echo "=== Pipeline complete ==="
+echo "Trained adapter: output/checkpoints/${RUN_NAME}"

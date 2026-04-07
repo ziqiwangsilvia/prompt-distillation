@@ -78,6 +78,7 @@ def main(
 
     input_path = generate_question_path(dataset_family, dataset, model, train_questions, temperature, max_items)
     output_path = generate_lesson_filename(dataset_family, dataset, variant, model, train_questions, temperature, max_items)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     if os.path.exists(output_path):
         print(f"{output_path} already exists — skipping.")
