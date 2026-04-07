@@ -28,7 +28,7 @@ def main(
     # Note: batch_size and micro_batch_size per device
     batch_size: int = 4,
     micro_batch_size: int = 4,
-    n_epochs: int = 10,
+    n_epochs: int = 2,
     train_temperature: float = 2.0,
     kl_div_loss: bool = True,
     token_loss_weight: float = 0.0,
