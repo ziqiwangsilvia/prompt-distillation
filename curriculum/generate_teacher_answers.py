@@ -7,6 +7,7 @@ from typing import List, Tuple, Dict
 
 import torch
 from tqdm import tqdm
+from openai import OpenAI
 from vllm import LLM as vLLM
 
 from core import DATA_PATH
@@ -97,7 +98,7 @@ def save_to_xml(lesson_id: str, exercises_with_answers: List[ExerciseWithAnswers
     print(f"Saved to {path}")
 
 
-def setup_models(base: str) -> Tuple[LLM, vLLM]:
+def setup_models(base: str, vllm_hostname: str = "") -> Tuple[LLM, object]:
     """Setup LLM and vLLM models."""
     if base not in MODEL_CONFIGS:
         raise ValueError(f"Model '{base}' not supported. Available models: {list(MODEL_CONFIGS.keys())}")
@@ -106,7 +107,12 @@ def setup_models(base: str) -> Tuple[LLM, vLLM]:
     opening_message = Message(Role.SYSTEM, config.system_message)
 
     llm = LLM(base, opening_message=opening_message)
-    vllm_client = vLLM(config.vllm_model, tensor_parallel_size=torch.cuda.device_count())
+
+    if vllm_hostname:
+        vllm_client = OpenAI(base_url=f"http://{vllm_hostname}:8000/v1", api_key="token-abc123")
+        vllm_client._model_name = config.vllm_model
+    else:
+        vllm_client = vLLM(config.vllm_model, tensor_parallel_size=torch.cuda.device_count())
 
     return llm, vllm_client
 
@@ -130,10 +136,11 @@ def main(
     question_temperature: float = 1.5,
     chunk_size: int = 10000,
     verbose: bool = False,
+    vllm_hostname: str = "",
 ):
     assert not (generate_lesson and generate_exam), "The code doesn't support generating lesson and exam simultaneously"
     # Setup models
-    llm, vllm_client = setup_models(base)
+    llm, vllm_client = setup_models(base, vllm_hostname)
     model_flags = create_model_flags(base)
 
     # Setup processing modes
@@ -160,6 +167,16 @@ def main(
         cleaned_xml_filename = clean_xml_content(xml_name)
         lessons = read_lessons(cleaned_xml_filename)
 
+    # Check if output already exists before expensive generation
+    first_lesson_id = next(iter(lessons))
+    output_fname = generate_augmented_filename(
+        first_lesson_id.rsplit('_', 1)[0], num_choices, temperature, model_flags
+    )
+    output_path = DATA_PATH / output_fname
+    if output_path.exists():
+        print(f"{output_path} already exists — skipping.", flush=True)
+        return
+
     # Generate prompts and exercises
     prompts = []
     exercises = []
@@ -178,11 +195,24 @@ def main(
     prompts_only = [p for p, _ in prompts]
     answers = []
 
-    for i in tqdm(range(0, len(prompts_only), chunk_size)):
-        chunk = prompts_only[i:i + chunk_size]
-        outputs = vllm_client.generate(chunk, sampling_params)
-        for output in outputs:
-            answers.append(output.outputs)
+    if isinstance(vllm_client, OpenAI):
+        for prompt in tqdm(prompts_only):
+            resp = vllm_client.completions.create(
+                model=vllm_client._model_name,
+                prompt=prompt,
+                n=num_choices,
+                max_tokens=max_total_tokens,
+                temperature=temperature,
+                top_p=1.0,
+                extra_body={"top_k": 50, "skip_special_tokens": False},
+            )
+            answers.append([c.text for c in resp.choices])
+    else:
+        for i in tqdm(range(0, len(prompts_only), chunk_size)):
+            chunk = prompts_only[i:i + chunk_size]
+            outputs = vllm_client.generate(chunk, sampling_params)
+            for output in outputs:
+                answers.append(output.outputs)
 
     end_time = time.time()
     print(f"Generation time: {end_time - start_time:.4f} s", flush=True)

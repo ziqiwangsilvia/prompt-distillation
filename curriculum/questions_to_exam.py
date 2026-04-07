@@ -1,9 +1,11 @@
+import os
 from xml.etree.ElementTree import Element, SubElement, tostring
 from typing import Literal, Optional
 
 from datasets import load_dataset
 
 from core.file_naming import generate_exam_filename, generate_exam_name
+from core.utils import load_squadshifts
 from curriculum.csv_to_lesson import prettify
 from evaluation.utils import get_prompt_context
 
@@ -18,7 +20,7 @@ def create_xml(
 
     # Dataset loading logic
     if dataset_family == "squadshifts":
-        hf_dataset = load_dataset(dataset_family, dataset, trust_remote_code=True)["test"]
+        hf_dataset = load_squadshifts(dataset)
     elif dataset_family == "hotpotqa":
         hf_dataset = load_dataset("hotpotqa/hotpot_qa", dataset, trust_remote_code=True)["validation"]
     else:
@@ -67,6 +69,9 @@ def main(
 
     # Build a unified output_dir string using variable interpolation
     output_dir = generate_exam_filename(dataset_family, dataset, variant, max_items) 
+    if os.path.exists(output_dir):
+        print(f"{output_dir} already exists — skipping.")
+        return
     print(f"Processing {dataset_family=}, {dataset=}, {variant=}, {max_items=}")
     xml_output = create_xml(dataset_family, dataset, max_items, variant)
     with open(output_dir, 'w', encoding='utf-8') as f:

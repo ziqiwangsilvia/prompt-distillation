@@ -1,6 +1,7 @@
 import numpy as np
 from datasets import load_dataset
 from typing import List, Optional
+from core.utils import load_squadshifts
 
 
 class ContextDistractorDataset:
@@ -39,7 +40,7 @@ def build_distractor_dataset(
     n_distractor_dataset_items: int = 1000,
 ) -> ContextDistractorDataset:
     """Build a distractor dataset from SQuADShifts."""
-    ds = load_dataset("squadshifts", dataset, trust_remote_code=True)["test"]
+    ds = load_squadshifts(dataset)
     prev_context = None
     contexts = []
     for i, item in enumerate(ds):

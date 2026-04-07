@@ -14,9 +14,8 @@ from core.file_naming import generate_question_path
 from core.llm import LLM
 from core.messages import Message, Role
 from core.model_configs import MODEL_CONFIGS, get_model_config
-from core.utils import generate_extra_body
-from evaluation.utils import async_wrapper
-from evaluation.utils import get_gt_answer, get_rag_context
+from core.utils import generate_extra_body, load_squadshifts
+from evaluation.utils import async_wrapper, get_gt_answer, get_rag_context
 
 MAX_FAILURES = 20
 
@@ -96,7 +95,7 @@ def main(
     output_directory_name = f"{dataset_family}_{dataset}"
 
     if dataset_family == "squadshifts":
-        ds = load_dataset("squadshifts", dataset, trust_remote_code=True)["test"]
+        ds = load_squadshifts(dataset)
     elif dataset_family == "hotpotqa":
         ds = load_dataset("hotpotqa/hotpot_qa", dataset, trust_remote_code=True)["validation"]
     else:
@@ -115,8 +114,8 @@ def main(
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     if output_file.exists():
-        print(f"{output_file} already exists — aborting to avoid overwrite.", flush=True)
-        sys.exit(1)
+        print(f"{output_file} already exists — skipping.", flush=True)
+        return
 
     print(f"Writing questions to {output_file}", flush=True)
     

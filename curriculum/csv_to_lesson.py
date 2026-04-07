@@ -1,6 +1,7 @@
 import argparse
 import csv
 import itertools
+import os
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 
@@ -77,6 +78,10 @@ def main(
 
     input_path = generate_question_path(dataset_family, dataset, model, train_questions, temperature, max_items)
     output_path = generate_lesson_filename(dataset_family, dataset, variant, model, train_questions, temperature, max_items)
+
+    if os.path.exists(output_path):
+        print(f"{output_path} already exists — skipping.")
+        return
 
     print(f"Processing {input_path}")
     xml_output = create_xml(dataset_family, dataset, input_path, model, train_questions, temperature, max_items, variant)

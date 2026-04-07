@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from core.llm import LLM
 from core.messages import Message, Role, merge_messages
 from core.model_configs import MODEL_CONFIGS, get_model_config
+from core.utils import load_squadshifts
 from evaluation.utils import async_wrapper, get_prompt_context, get_gt_answer
 
 
@@ -40,7 +41,7 @@ def main(
     if "llama" in base.lower():
         extra_body["stop_token_ids"] = [128009]
 
-    ds = load_dataset("squadshifts", dataset, trust_remote_code=True)["test"]
+    ds = load_squadshifts(dataset)
     out_file = Path(f"./datasets/{dataset}_filtered.csv")
     out_file.parent.mkdir(exist_ok=True, parents=True)
     if out_file.exists():

@@ -16,6 +16,7 @@ from tqdm import tqdm
 from core.llm import LLM
 from core.messages import Message, Role
 from core.model_configs import get_model_config
+from core.utils import load_squadshifts
 from evaluation.utils import (
     get_rag_context,
     get_prompt_context,
@@ -95,7 +96,7 @@ def main(
 
     output_dir_name = f"{dataset_family}_{dataset}"
     if dataset_family == "squadshifts":
-        hf_split = load_dataset("squadshifts", dataset, trust_remote_code=True)["test"]
+        hf_split = load_squadshifts(dataset)
     elif dataset_family == "hotpotqa":
         hf_split = load_dataset("hotpotqa/hotpot_qa", dataset, trust_remote_code=True)[
             "validation"

@@ -17,7 +17,7 @@ from transformers import (
 from datasets import load_dataset, Dataset
 from peft import get_peft_model, LoraConfig, TaskType
 
-from core.utils import set_seed
+from core.utils import set_seed, load_squadshifts
 from core.model_configs import MODEL_CONFIGS
 from training.utils import (
     extract_primitive_config,
@@ -34,7 +34,7 @@ def load_and_prepare_dataset(dataset: str, n_items: int) -> Dataset:
     if dataset not in SUPPORTED_DATASETS:
         raise NotImplementedError(f"Unknown dataset {dataset}. Supported: {SUPPORTED_DATASETS}")
 
-    full_dataset = load_dataset("squadshifts", dataset, trust_remote_code=True)["test"]
+    full_dataset = load_squadshifts(dataset)
     return full_dataset.select(range(n_items))
 
 
