@@ -4,20 +4,53 @@
 set -euo pipefail
 
 # Ensure project root is on Python path
-export PYTHONPATH="${PYTHONPATH:-}:$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONPATH="${PYTHONPATH:-}:${SCRIPT_DIR}"
 
-VLLM_GPU="${VLLM_GPU:-0}"
-TRAIN_GPU="${TRAIN_GPU:-1}"
-VLLM_HOST="${VLLM_HOST:-localhost}"
-STUDENT_BASE="${STUDENT_BASE:-llama3-8b-instruct}"
-TEACHER_BASE="${TEACHER_BASE:-${STUDENT_BASE}}"
-DATASET_FAMILY="${DATASET_FAMILY:-financial}"
-DATASET="${DATASET:-tool_calling}"
-MAX_ITEMS="${MAX_ITEMS:-20}"
-MAX_TRAIN_ITEMS="${MAX_TRAIN_ITEMS:-200}"
-TOOL_BATCHES="${TOOL_BATCHES:-10}"
-NLP_BATCHES="${NLP_BATCHES:-5}"
-RUN_NAME="${RUN_NAME:-pd_fin_llm}"
+CONFIG="${1:-config/pipeline.yaml}"
+
+# Parse YAML config into shell variables
+eval "$(python3 -c "
+import yaml, sys
+with open('${CONFIG}') as f:
+    c = yaml.safe_load(f)
+m = c.get('models', {})
+d = c.get('dataset', {})
+g = c.get('gpu', {})
+q = c.get('questions', {})
+ta = c.get('teacher_answers', {})
+t = c.get('training', {})
+print(f'TEACHER_BASE=\"{m.get(\"teacher\", \"llama3-8b-instruct\")}\"')
+print(f'STUDENT_BASE=\"{m.get(\"student\", \"llama3-8b-instruct\")}\"')
+print(f'DATASET_FAMILY=\"{d.get(\"family\", \"financial\")}\"')
+print(f'DATASET=\"{d.get(\"name\", \"tool_calling\")}\"')
+print(f'VLLM_GPU=\"{g.get(\"vllm\", 0)}\"')
+print(f'TRAIN_GPU=\"{g.get(\"train\", 1)}\"')
+print(f'VLLM_HOST=\"{g.get(\"vllm_host\", \"localhost\")}\"')
+print(f'TOOL_BATCHES=\"{q.get(\"tool_batches\", 10)}\"')
+print(f'NLP_BATCHES=\"{q.get(\"nlp_batches\", 5)}\"')
+print(f'EVAL_RATIO=\"{q.get(\"eval_ratio\", 0.2)}\"')
+print(f'MAX_TRAIN_ITEMS=\"{q.get(\"max_train_items\", 200)}\"')
+print(f'MAX_ITEMS=\"{q.get(\"max_eval_items\", 20)}\"')
+print(f'LESSON_TEMP=\"{ta.get(\"lesson_temp\", 0.25)}\"')
+print(f'EXAM_TEMP=\"{ta.get(\"exam_temp\", 0.25)}\"')
+print(f'MAX_TOTAL_TOKENS=\"{ta.get(\"max_total_tokens\", 4096)}\"')
+print(f'MAX_NEW_TOKENS=\"{ta.get(\"max_new_tokens\", 500)}\"')
+print(f'RUN_NAME=\"{t.get(\"run_name\", \"pd_fin_llm\")}\"')
+print(f'LEARNING_RATE=\"{t.get(\"learning_rate\", 1e-5)}\"')
+print(f'BATCH_SIZE=\"{t.get(\"batch_size\", 4)}\"')
+print(f'MICRO_BATCH_SIZE=\"{t.get(\"micro_batch_size\", 4)}\"')
+print(f'N_EPOCHS=\"{t.get(\"n_epochs\", 2)}\"')
+print(f'LORA_R=\"{t.get(\"lora_r\", 1024)}\"')
+print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
+print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
+print(f'WARMUP_RATIO=\"{t.get(\"warmup_ratio\", 0.1)}\"')
+print(f'WEIGHT_DECAY=\"{t.get(\"weight_decay\", 0.1)}\"')
+print(f'MAX_GRAD_NORM=\"{t.get(\"max_grad_norm\", 1.0)}\"')
+print(f'USE_WANDB=\"{t.get(\"use_wandb\", False)}\"')
+print(f'DEEPSPEED_PATH=\"{t.get(\"deepspeed_path\", \"\")}\"')
+print(f'SYSTEM_PROMPT_PATH=\"{c.get(\"system_prompt_path\", \"\")}\"')
+")"
 
 # Resolve HuggingFace model ID and family from base config name
 resolve_model() {
@@ -29,7 +62,9 @@ resolve_family() {
 TEACHER_MODEL=$(resolve_model "${TEACHER_BASE}")
 STUDENT_MODEL=$(resolve_model "${STUDENT_BASE}")
 TEACHER_FAMILY=$(resolve_family "${TEACHER_BASE}")
-SYSTEM_PROMPT_PATH="${SYSTEM_PROMPT_PATH:-context/financial_system_prompt_${TEACHER_FAMILY}.txt}"
+if [ -z "${SYSTEM_PROMPT_PATH}" ]; then
+    SYSTEM_PROMPT_PATH="context/financial_system_prompt_${TEACHER_FAMILY}.txt"
+fi
 
 echo "=== Financial Prompt Distillation Pipeline ==="
 echo "  Teacher:          ${TEACHER_BASE} (${TEACHER_MODEL})"
@@ -145,7 +180,7 @@ if [ -f "${CHECKPOINT_DIR}/adapter_model.safetensors" ]; then
 else
     TRAIN_ARGS=(
         --run_name "${RUN_NAME}"
-        --use_wandb False
+        --use_wandb "${USE_WANDB}"
         --base "${STUDENT_BASE}"
         --dataset_family "${DATASET_FAMILY}"
         --dataset "${DATASET}"
@@ -155,10 +190,21 @@ else
         --train_questions "${MAX_TRAIN_ITEMS}"
         --max_items_train "${MAX_TRAIN_ITEMS}"
         --max_items_test "${MAX_ITEMS}"
-        --token_loss_weight 1.0
-        --logit_loss_weight 0.0
-        --lesson_temp 0.25
+        --learning_rate "${LEARNING_RATE}"
+        --batch_size "${BATCH_SIZE}"
+        --micro_batch_size "${MICRO_BATCH_SIZE}"
+        --n_epochs "${N_EPOCHS}"
+        --lora_r "${LORA_R}"
+        --token_loss_weight "${TOKEN_LOSS_WEIGHT}"
+        --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
+        --warmup_ratio "${WARMUP_RATIO}"
+        --weight_decay "${WEIGHT_DECAY}"
+        --max_grad_norm "${MAX_GRAD_NORM}"
+        --lesson_temp "${LESSON_TEMP}"
     )
+    if [ -n "${DEEPSPEED_PATH}" ]; then
+        TRAIN_ARGS+=(--deepspeed_path "${DEEPSPEED_PATH}")
+    fi
     CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/run_train_student.py "${TRAIN_ARGS[@]}"
 fi
 

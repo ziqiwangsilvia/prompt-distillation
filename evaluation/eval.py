@@ -91,7 +91,49 @@ def run_inference(
         for r in results:
             f.write(json.dumps(r) + "\n")
 
-    print(f"Saved {len(results)} results to {output_file}")
+    # Metrics
+    n = len(results)
+    exact = 0
+    tool_correct = 0
+    tool_total = 0
+    type_match = 0
+
+    for r in results:
+        pred = r["prediction"].strip()
+        ref = (r["reference"] or "").strip()
+
+        # Classify response type
+        pred_is_tool = pred.startswith("{") and '"name"' in pred
+        ref_is_tool = ref.startswith("{") and '"name"' in ref
+
+        if pred_is_tool == ref_is_tool:
+            type_match += 1
+
+        if pred == ref:
+            exact += 1
+
+        if ref_is_tool:
+            tool_total += 1
+            try:
+                pred_json = json.loads(pred.split("\n")[0])
+                ref_json = json.loads(ref)
+                if pred_json.get("name") == ref_json.get("name"):
+                    if pred_json.get("parameters") == ref_json.get("parameters"):
+                        tool_correct += 1
+            except (json.JSONDecodeError, IndexError):
+                pass
+
+    text_total = n - tool_total
+    print(f"\n{'='*50}")
+    print(f"METRICS ({n} examples)")
+    print(f"{'='*50}")
+    print(f"  Type match (tool vs text): {type_match}/{n} ({100*type_match/n:.1f}%)")
+    print(f"  Exact match:               {exact}/{n} ({100*exact/n:.1f}%)")
+    if tool_total:
+        print(f"  Tool call accuracy:        {tool_correct}/{tool_total} ({100*tool_correct/tool_total:.1f}%)")
+    print(f"  Tool calls: {tool_total}, Text: {text_total}")
+
+    print(f"\nSaved {n} results to {output_file}")
 
 
 if __name__ == "__main__":
