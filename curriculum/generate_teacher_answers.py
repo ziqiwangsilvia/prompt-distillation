@@ -81,17 +81,19 @@ def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
             print(f"  Skipping mixed response: {answer[:80]}...")
             continue
 
+        # Strip stop token if present, drop truncated answers
+        raw_tokens = llm.tokenize(answer)
+        terminators = llm.get_terminators()
+        if raw_tokens.numel() > 0 and raw_tokens[0, -1] in terminators:
+            answer = llm.decode(raw_tokens[:, :-1])
+        else:
+            print(f"  Skipping truncated answer: {answer[:80]}...")
+            continue
+
         if source_family and target_family and source_family != target_family:
             answer = convert_tool_call_format(answer, source_family, target_family)
 
-        tokens = llm.tokenize(answer)
-        terminators = llm.get_terminators()
-        truncated = bool(tokens[0, -1] not in terminators)
-        if truncated:
-            answer = llm.decode(tokens)
-        else:
-            answer = llm.decode(tokens[:, :-1])
-        choice = Choice(answer, truncated)
+        choice = Choice(answer)
         answer_choices.append(choice)
 
     messages = [Message(Role.USER, exercise.teacher_prompt_with_tips_tags)]

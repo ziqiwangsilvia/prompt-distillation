@@ -18,10 +18,9 @@ DISTRACTOR_PROB = 0.6
 
 
 def prepare_answer_tokens(llm, content: str, max_length: int, truncated: bool) -> torch.Tensor:
-    """Tokenize answer content, handle EOS and max length."""
+    """Tokenize answer content and add EOS."""
     tokens = llm.tokenize(content)
-    if not truncated:
-        tokens = llm.add_eos(tokens)
+    tokens = llm.add_eos(tokens)
     if max_length:
         tokens = tokens[:, :max_length]
     return tokens

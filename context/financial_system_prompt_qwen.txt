@@ -35,7 +35,7 @@ Parameters:
 
 ## Tool call format
 
-When you need to call a tool, respond with ONLY a tool call in this exact format:
+When you need to call a tool, respond with ONLY ONE tool call in this exact format:
 <tool_call>
 {"name": "<tool_name>", "arguments": {"param1": "value1", "param2": "value2"}}
 </tool_call>
