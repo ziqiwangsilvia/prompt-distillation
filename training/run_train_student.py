@@ -6,12 +6,12 @@ from typing import Literal, Union, Optional
 from peft import LoraConfig
 import randomname
 
-from core import BASE_PATH
-from core.file_naming import generate_lesson_name, generate_exam_name, generate_augmented_filename 
-from core.llm import LLM
-from core.messages import Message, Role
-from core.model_configs import MODEL_CONFIGS, create_model_flags
-from core.utils import set_seed
+from data.paths import BASE_PATH
+from data.naming import generate_lesson_name, generate_exam_name, generate_augmented_filename 
+from models.llm import LLM
+from models.messages import Message, Role
+from models.configs import MODEL_CONFIGS, create_model_flags
+from models.utils import set_seed
 from training.train_student import train
 
 def main(

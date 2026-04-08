@@ -5,8 +5,8 @@ from typing import Literal, Optional
 
 from datasets import load_dataset
 
-from core.file_naming import generate_exam_filename, generate_exam_name, generate_question_path
-from core.utils import load_squadshifts
+from data.naming import generate_exam_filename, generate_exam_name, generate_question_path
+from data.loading import load_squadshifts
 from curriculum.csv_to_lesson import prettify
 from evaluation.utils import get_prompt_context
 

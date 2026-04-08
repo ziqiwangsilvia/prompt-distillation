@@ -4,9 +4,8 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from typing import Optional, List, Dict
 
-from core import BASE_PATH
-from core.utils import remove_empty
-from curriculum import TIPS_START, TIPS_END, DELIMITER
+from data.paths import BASE_PATH, TIPS_START, TIPS_END, DELIMITER
+from models.utils import remove_empty
 
 XML_STYLE = True
 
@@ -57,7 +56,7 @@ class Lesson:
         return self.material.text.strip()
 
     def create_exercise_prompts(self, verbose: bool) -> List["Exercise"]:
-        """Attach prompts to each exercise in this lesson,"""
+        """Attach prompts to each exercise in this lesson."""
         my_print = print if verbose else lambda *x, **y: None
         tips = [self.render_material()]
         tips = remove_empty(tips)

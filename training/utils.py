@@ -14,10 +14,10 @@ import torch
 from torch.utils.data import Sampler
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 
-from core.llm import LLM
-from core.messages import Message
-from core.model_configs import MODEL_CONFIGS
-from curriculum import TIPS_START, TIPS_END, DELIMITER
+from models.llm import LLM
+from models.messages import Message
+from models.configs import MODEL_CONFIGS
+from data.paths import TIPS_START, TIPS_END, DELIMITER
 from curriculum.exercise_with_answers import ExerciseWithAnswers
 from training.metrics import Aggregator
 

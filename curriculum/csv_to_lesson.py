@@ -5,7 +5,7 @@ import os
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 
-from core.file_naming import generate_question_path, generate_lesson_name, generate_lesson_filename
+from data.naming import generate_question_path, generate_lesson_name, generate_lesson_filename
 
 def prettify(elem: Element) -> str:
     """Return a pretty-printed XML string for the Element."""

@@ -12,12 +12,11 @@ from typing import Optional
 
 def extract_tool_call_qwen(text: str) -> Optional[dict]:
     """Extract tool call from Qwen format: <tool_call>{"name": ..., "arguments": ...}</tool_call>"""
-    # Match <tool_call> followed by JSON, with or without </tool_call>
     m = re.search(r'<tool_call>\s*(\{.*\})', text, re.DOTALL)
     if m:
         raw = m.group(1).replace('</tool_call>', '').strip()
-        # Handle Qwen's double-quote escaping: ""key"" -> "key"
-        raw = re.sub(r'""([^"]*?)""', r'"\1"', raw)
+        while '""' in raw:
+            raw = raw.replace('""', '"')
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -31,7 +30,6 @@ def extract_tool_call_llama(text: str) -> Optional[dict]:
     if m:
         try:
             parsed = json.loads(m.group(1))
-            # Llama uses "parameters" instead of "arguments"
             if "parameters" in parsed and "arguments" not in parsed:
                 parsed["arguments"] = parsed.pop("parameters")
             return parsed
@@ -78,13 +76,24 @@ def convert_tool_call_format(text: str, source_family: str, target_family: str) 
     """Convert tool-call text from source model format to target model format.
     
     If no tool call is detected (i.e., NLP response), returns text unchanged.
+    Preserves any surrounding text (e.g., mixed text + tool call responses).
     """
     if source_family == target_family:
         return text
 
-    tool_call = extract_tool_call(text, source_family)
-    if tool_call is None:
-        # Not a tool call — plain NLP response, return as-is
+    if source_family == "qwen":
+        m = re.search(r'<tool_call>\s*\{.*\}(\s*</tool_call>)?', text, re.DOTALL)
+    elif source_family == "llama":
+        m = re.search(r'<\|python_tag\|>\s*\{.*\}', text, re.DOTALL)
+    else:
+        raise ValueError(f"Unknown source family: {source_family}")
+
+    if not m:
         return text
 
-    return format_tool_call(tool_call, target_family)
+    tool_call = extract_tool_call(text, source_family)
+    if tool_call is None:
+        return text
+
+    formatted = format_tool_call(tool_call, target_family)
+    return text[:m.start()] + formatted + text[m.end():]

@@ -1,5 +1,6 @@
 # %%
 import os
+import re
 import time
 import warnings
 import xml.etree.ElementTree as ET
@@ -10,13 +11,13 @@ from tqdm import tqdm
 from openai import OpenAI
 from vllm import LLM as vLLM
 
-from core import DATA_PATH
-from core.file_naming import generate_augmented_filename, generate_lesson_filename, generate_exam_filename
-from core.llm import LLM, get_model_family
-from core.messages import Message, Role, merge_messages
-from core.model_configs import create_model_flags, MODEL_CONFIGS, get_model_config
-from core.tool_call_format import convert_tool_call_format
-from core.utils import generate_sampling_params
+from data.paths import DATA_PATH
+from data.naming import generate_augmented_filename, generate_lesson_filename, generate_exam_filename
+from models.llm import LLM, get_model_family
+from models.messages import Message, Role, merge_messages
+from models.configs import create_model_flags, MODEL_CONFIGS, get_model_config
+from models.tool_call_format import convert_tool_call_format
+from models.utils import generate_sampling_params
 from curriculum.lesson import read_lessons, Lesson, Exercise
 from curriculum.exercise_with_answers import ExerciseWithAnswers, Choice, xml_dump
 from training.utils import clean_xml_content
@@ -57,6 +58,16 @@ def generate_prompt(
     return prompts, exercises
 
 
+def _is_mixed_response(text: str) -> bool:
+    """Detect responses that mix text with a tool call."""
+    tc = re.search(r'<tool_call>\s*\{.*\}\s*(</tool_call>)?', text, re.DOTALL)
+    if tc is None:
+        return False  # pure text, no tool call
+    before = text[:tc.start()].strip()
+    after = text[tc.end():].strip()
+    return bool(before or after)
+
+
 def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
                     source_family: str = "", target_family: str = "") -> ExerciseWithAnswers:
     """Process answers for an exercise, optionally converting tool-call format."""
@@ -65,6 +76,10 @@ def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
     for answer in answers:
         if not isinstance(answer, str):
             answer = answer.text
+
+        if _is_mixed_response(answer):
+            print(f"  Skipping mixed response: {answer[:80]}...")
+            continue
 
         if source_family and target_family and source_family != target_family:
             answer = convert_tool_call_format(answer, source_family, target_family)
@@ -235,9 +250,11 @@ def main(
     student_family = get_model_family(get_model_config(student_base).vllm_model) if student_base else teacher_family
     exercises_with_answers = []
     for ex, ans in zip(exercises, answers):
-        exercises_with_answers.append(process_answers(llm, ex, ans, teacher_family, student_family))
-
-    assert len(exercises_with_answers) == len(exercises)
+        ewa = process_answers(llm, ex, ans, teacher_family, student_family)
+        if ewa.answer_choices:
+            exercises_with_answers.append(ewa)
+        else:
+            print(f"  Dropped exercise with 0 valid answers")
 
     # Save results
     save_to_xml(

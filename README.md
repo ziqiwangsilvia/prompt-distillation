@@ -6,13 +6,15 @@ This repository contains the code necessary to reproduce the main results of our
 ## Repository Structure
 
 ```
-├── baselines/         # Directory for unsuprevised fine-tuning baselines
-├── config/            # DeepSpeed Configs 
-├── core/              # LLM core functionalities 
-├── curriculum/        # Functionalities for the creation of training data 
-├── datasets/          # Evaluation datasets 
-├── evaluation/        # Miscellaneous scripts for evaluation 
+├── models/            # LLM class, model configs, messages, tool call format
+├── data/              # File naming and dataset loading utilities
+├── curriculum/        # Lesson/exercise data structures and curriculum generation scripts
 ├── training/          # Code for performing training runs 
+├── evaluation/        # Miscellaneous scripts for evaluation 
+├── config/            # DeepSpeed Configs 
+├── datasets/          # Evaluation datasets 
+├── paths.py           # Path constants and markup tags (TIPS, DELIMITER)
+├── utils.py           # General utilities (seeding, GPU, sampling params, etc.)
 ├── requirements.txt   # Dependencies
 ├── README.md          # This file
 └── setup.py           # Setup file 

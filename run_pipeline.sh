@@ -3,6 +3,9 @@
 # Manages vLLM server lifecycle: starts on VLLM_GPU, trains on TRAIN_GPU.
 set -euo pipefail
 
+# Ensure project root is on Python path
+export PYTHONPATH="${PYTHONPATH:-}:$(cd "$(dirname "$0")" && pwd)"
+
 VLLM_GPU="${VLLM_GPU:-0}"
 TRAIN_GPU="${TRAIN_GPU:-1}"
 VLLM_HOST="${VLLM_HOST:-localhost}"
@@ -18,10 +21,10 @@ RUN_NAME="${RUN_NAME:-pd_fin_llm}"
 
 # Resolve HuggingFace model ID and family from base config name
 resolve_model() {
-    python3 -c "from core.model_configs import MODEL_CONFIGS; print(MODEL_CONFIGS['$1'].vllm_model)"
+    python3 -c "from models.configs import MODEL_CONFIGS; print(MODEL_CONFIGS['$1'].vllm_model)"
 }
 resolve_family() {
-    python3 -c "from core.llm import get_model_family; from core.model_configs import MODEL_CONFIGS; print(get_model_family(MODEL_CONFIGS['$1'].vllm_model))"
+    python3 -c "from models.llm import get_model_family; from models.configs import MODEL_CONFIGS; print(get_model_family(MODEL_CONFIGS['$1'].vllm_model))"
 }
 TEACHER_MODEL=$(resolve_model "${TEACHER_BASE}")
 STUDENT_MODEL=$(resolve_model "${STUDENT_BASE}")
@@ -49,11 +52,11 @@ CUDA_VISIBLE_DEVICES="${VLLM_GPU}" python3 -u -m vllm.entrypoints.openai.api_ser
     --tensor-parallel-size 1 &
 VLLM_PID=$!
 
-# Wait for server to be ready
+# Wait for server to be ready (test actual model availability, not just health endpoint)
 echo "Waiting for vLLM server..."
-for i in $(seq 1 120); do
-    if curl -s "http://${VLLM_HOST}:8000/health" > /dev/null 2>&1; then
-        echo "vLLM server ready."
+for i in $(seq 1 180); do
+    if curl -s "http://${VLLM_HOST}:8000/v1/models" -H "Authorization: Bearer token-abc123" 2>/dev/null | grep -q "${TEACHER_MODEL}"; then
+        echo "vLLM server ready (model loaded)."
         break
     fi
     if ! kill -0 "${VLLM_PID}" 2>/dev/null; then
@@ -62,8 +65,8 @@ for i in $(seq 1 120); do
     fi
     sleep 2
 done
-if ! curl -s "http://${VLLM_HOST}:8000/health" > /dev/null 2>&1; then
-    echo "ERROR: vLLM server failed to start within timeout."
+if ! curl -s "http://${VLLM_HOST}:8000/v1/models" -H "Authorization: Bearer token-abc123" 2>/dev/null | grep -q "${TEACHER_MODEL}"; then
+    echo "ERROR: vLLM server failed to load model within timeout."
     kill "${VLLM_PID}" 2>/dev/null || true
     exit 1
 fi
@@ -77,7 +80,7 @@ trap cleanup EXIT
 
 # Step 1: Generate questions
 echo "[1/6] Generating questions..."
-python3 evaluation/sample_tool_questions.py \
+python3 curriculum/sample_tool_questions.py \
     --system_prompt_path "${SYSTEM_PROMPT_PATH}" \
     --vllm_hostname "${VLLM_HOST}" \
     --base "${TEACHER_BASE}" \

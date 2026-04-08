@@ -11,6 +11,7 @@ Usage:
 """
 import asyncio
 import csv
+import random
 import re
 import time
 from pathlib import Path
@@ -18,11 +19,11 @@ from typing import Dict, List
 
 from openai import AsyncOpenAI
 
-from core.file_naming import generate_question_path
-from core.llm import LLM
-from core.messages import Message, Role
-from core.model_configs import get_model_config
-from core.utils import generate_extra_body
+from data.naming import generate_question_path
+from models.llm import LLM
+from models.messages import Message, Role
+from models.configs import get_model_config
+from models.utils import generate_extra_body
 from evaluation.utils import async_wrapper
 
 MAX_FAILURES = 20
@@ -104,18 +105,19 @@ async def _sample_questions(
     return qs
 
 
-def _generate_and_write(label, output_file, t_batches, n_batches, needed_calls,
-                        system_prompt, llm, client, cfg, extra_body, temperature, max_tokens):
-    if output_file.exists():
-        print(f"{output_file} already exists — skipping {label}.", flush=True)
+def _generate_and_split(train_file, eval_file, t_batches, n_batches, needed_calls,
+                        eval_ratio, system_prompt, llm, client, cfg, extra_body, temperature, max_tokens):
+    if train_file.exists() and eval_file.exists():
+        print(f"Both {train_file} and {eval_file} already exist — skipping.", flush=True)
         return
 
+    total_batches = t_batches + n_batches
     prompts = (
         [_build_prompt(system_prompt, llm, nlp=False) for _ in range(t_batches)]
         + [_build_prompt(system_prompt, llm, nlp=True) for _ in range(n_batches)]
     )
 
-    print(f"Generating {label} questions: {t_batches} tool + {n_batches} NLP batches", flush=True)
+    print(f"Generating questions: {t_batches} tool + {n_batches} NLP batches", flush=True)
 
     start_time = time.time()
     questions_per_batch = asyncio.run(
@@ -138,15 +140,20 @@ def _generate_and_write(label, output_file, t_batches, n_batches, needed_calls,
                 unique.append(q_clean)
 
     if not unique:
-        print(f"WARNING: No {label} questions generated — not writing empty file.", flush=True)
-        return
+        raise RuntimeError("No questions generated — check vLLM server connection.")
 
-    with open(output_file, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f, delimiter=";")
-        for q in unique:
-            writer.writerow([q.replace("\n", " "), system_prompt.replace("\n", " ")])
+    # Split into train/eval
+    random.shuffle(unique)
+    n_eval = max(1, int(len(unique) * eval_ratio))
+    eval_qs = unique[:n_eval]
+    train_qs = unique[n_eval:]
 
-    print(f"{len(unique)} unique {label} questions written to {output_file}", flush=True)
+    for path, qs, label in [(train_file, train_qs, "train"), (eval_file, eval_qs, "eval")]:
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, delimiter=";")
+            for q in qs:
+                writer.writerow([q.replace("\n", " "), system_prompt.replace("\n", " ")])
+        print(f"{len(qs)} unique {label} questions written to {path}", flush=True)
 
 
 def main(
@@ -161,8 +168,7 @@ def main(
     vllm_hostname: str = "",
     tool_batches: int = 10,
     nlp_batches: int = 5,
-    eval_tool_batches: int = 3,
-    eval_nlp_batches: int = 2,
+    eval_ratio: float = 0.2,
 ) -> None:
     system_prompt = Path(system_prompt_path).read_text().strip()
     cfg = get_model_config(base)
@@ -180,17 +186,12 @@ def main(
     train_file.parent.mkdir(parents=True, exist_ok=True)
     eval_file = train_file.parent / f"eval_{train_file.name}"
 
-    common = dict(system_prompt=system_prompt, llm=llm, client=client, cfg=cfg,
-                  extra_body=extra_body, temperature=temperature, max_tokens=max_tokens)
-
-    _generate_and_write(
-        "train", train_file, tool_batches, nlp_batches,
+    _generate_and_split(
+        train_file, eval_file, tool_batches, nlp_batches,
         max(1, train_questions // (5 * (tool_batches + nlp_batches))),
-        **common,
-    )
-    _generate_and_write(
-        "eval", eval_file, eval_tool_batches, eval_nlp_batches, 1,
-        **common,
+        eval_ratio,
+        system_prompt=system_prompt, llm=llm, client=client, cfg=cfg,
+        extra_body=extra_body, temperature=temperature, max_tokens=max_tokens,
     )
 
 

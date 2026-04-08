@@ -22,8 +22,8 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, PreTrainedModel
 import wandb
 
-from core.llm import LLM
-from core.utils import DualOutput, num_parameters
+from models.llm import LLM
+from models.utils import DualOutput, num_parameters
 from training import PADDING_VALUE
 from training.metrics import Aggregator
 from training.student_teacher_dataset import (

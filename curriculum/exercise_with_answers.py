@@ -6,8 +6,9 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from typing import Optional, List
 
-from curriculum import TIPS_START, TIPS_END
-from core.messages import Message
+from data.paths import TIPS_START, TIPS_END
+from models.messages import Message
+
 
 def _get_messages(xml_element: ET.Element) -> List[Message]:
     """Parse and return Message objects from a <messages> element."""
@@ -118,14 +119,15 @@ class ExerciseWithAnswers:
     def __repr__(self):
         return str(self)
 
+
 def xml_dump(element: ET.Element, file) -> None:
     """Write XML for an element to a file, with tag-per-line formatting."""
     xml_content = ET.tostring(element, encoding='unicode')
-    # Start each tag on a new line
     xml_content = xml_content.replace("<", "\n<").replace(">", ">\n")
     xml_content = xml_content.replace(escape(TIPS_START), TIPS_START)
     xml_content = xml_content.replace(escape(TIPS_END), TIPS_END)
     file.write(xml_content)
+
 
 def save_to_xml(
     filepath: os.PathLike,

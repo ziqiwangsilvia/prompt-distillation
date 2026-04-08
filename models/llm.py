@@ -8,10 +8,10 @@ from typing import Union, List, Optional, Tuple
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
-from .model_configs import get_model_config
-from . import MODEL_PATH
+from .configs import get_model_config
+from data.paths import MODEL_PATH
 from .messages import Message, Role, merge_messages, QUESTION_PLACEHOLDER
-from .utils import get_adapter_path
+from models.utils import get_adapter_path
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -87,22 +87,13 @@ class LLM:
         return self.tokenizer.apply_chat_template(new_messages, tokenize=False, add_generation_prompt=True)
 
     def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False) -> str:
-        prompt = ""
+        new_messages = []
         for i, msg in enumerate(messages):
-            header = {
-                Role.SYSTEM: "system",
-                Role.AI: "assistant",
-                Role.USER: "user",
-            }.get(msg.role)
-            if not header:
+            if msg.role not in {Role.SYSTEM, Role.USER}:
                 raise ValueError(f"Wrong message role {msg.role}.")
-            if placeholder and i == len(messages) - 1:
-                content = QUESTION_PLACEHOLDER
-            else:
-                content = msg.content
-            prompt += f"<|start_header_id|>{header}<|end_header_id|>\n\n{content}<|eot_id|>"
-        prompt += "<|start_header_id|>assistant<|end_header_id|>\n\n"
-        return prompt
+            content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
+            new_messages.append({"role": msg.role.value, "content": content})
+        return self.tokenizer.apply_chat_template(new_messages, tokenize=False, add_generation_prompt=True)
 
     def tokenize(self, seq: str) -> torch.Tensor:
         return self.tokenizer.encode(seq, add_special_tokens=False, return_tensors="pt")
@@ -110,7 +101,7 @@ class LLM:
     def add_bos(self, tokens: torch.Tensor) -> torch.Tensor:
         if self.tokenizer.bos_token_id is not None:
             if tokens[0, 0] == self.tokenizer.bos_token_id:
-                raise ValueError("Adding BOS to a sequence that already contains it")
+                return tokens  # already has BOS
             bos = torch.tensor([[self.tokenizer.bos_token_id]])
             return torch.cat([bos, tokens], dim=1)
         return tokens
@@ -208,7 +199,6 @@ def get_adapter_chain(adapter_id: str) -> Tuple[str, List[str]]:
     """Get the model ID and adapter chain for a given adapter."""
     adapter_path = Path(get_adapter_path(adapter_id))
 
-    # Our config file is in the adapter's directory
     base_model_config_file = adapter_path / "base_model_config.json"
     if os.path.exists(base_model_config_file):
         with open(base_model_config_file, 'r') as f:

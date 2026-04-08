@@ -8,8 +8,8 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from typing import List, Dict, Any, Optional
 
-from core import DATA_PATH
-from core.messages import Role, QUESTION_PLACEHOLDER
+from data.paths import DATA_PATH
+from models.messages import Role, QUESTION_PLACEHOLDER
 from curriculum.exercise_with_answers import ExerciseWithAnswers
 from training import IGNORE_INDEX
 from training.utils import tokenize, read_exercises, ensure_path_exists, extract_question, extract_material_and_question

@@ -1,25 +1,19 @@
 from datetime import datetime
-import git
 import glob
-import importlib
 import json
 import os
 from pathlib import Path
-import pickle
 import random
-import re
 import string
 import sys
-import traceback
-from types import SimpleNamespace, FunctionType
+from types import SimpleNamespace
 from typing import Any, Dict
-import warnings
-from xml.sax.saxutils import escape as sx_escape
 
+import numpy as np
 import torch
 from vllm import SamplingParams
 
-from . import BASE_PATH, ADAPTER_PATH
+from data.paths import BASE_PATH, ADAPTER_PATH
 
 
 def generate_extra_body(base: str) -> Dict[str, Any]:
@@ -81,7 +75,6 @@ class DualOutput:
         self.log.write(message)
 
     def flush(self):
-        # This flush method is needed for the file and terminal to handle the buffer
         self.terminal.flush()
         self.log.flush()
 
@@ -96,10 +89,8 @@ def get_adapter_path(adapter_id: str) -> str:
 
     if len(matching_folders) > 1:
         raise ValueError(f"Multiple adapters found: {matching_folders}")
-
     elif len(matching_folders) == 0:
         raise ValueError(f"Adapter not found: {adapter_id}")
-
     else:
         print(f"Adapter found: {matching_folders[0]}")
         return matching_folders[0]
@@ -126,37 +117,24 @@ def random_id(length: int) -> str:
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
 
-_SQUADSHIFTS_URLS = {
-    "new_wiki": "https://raw.githubusercontent.com/modestyachts/squadshifts-website/master/datasets/new_wiki_v1.0.json",
-    "nyt": "https://raw.githubusercontent.com/modestyachts/squadshifts-website/master/datasets/nyt_v1.0.json",
-    "reddit": "https://raw.githubusercontent.com/modestyachts/squadshifts-website/master/datasets/reddit_v1.0.json",
-    "amazon": "https://raw.githubusercontent.com/modestyachts/squadshifts-website/master/datasets/amazon_reviews_v1.0.json",
-}
+# --- GPU utilities (previously core/putils.py) ---
+
+def print_gpu_utilization() -> list:
+    """Print and return GPU memory usage in MB (using pyrsmi/rocml)."""
+    from pyrsmi import rocml
+    rocml.smi_initialize()
+    ndevices = rocml.smi_get_device_count()
+    used = [rocml.smi_get_device_memory_used(i) for i in range(ndevices)]
+    usage_str = "GPU memory used (MB): " + " ".join(f"[{i}]:{used[i]//1024**2}" for i in range(ndevices))
+    print(usage_str)
+    rocml.smi_shutdown()
+    return used
 
 
-def load_squadshifts(subset: str):
-    """Load a SquadShifts subset directly from source JSON, bypassing the deprecated HF loading script."""
-    import urllib.request
-    from datasets import Dataset
-
-    url = _SQUADSHIFTS_URLS[subset]
-    with urllib.request.urlopen(url) as resp:
-        squad = json.loads(resp.read().decode("utf-8"))
-
-    rows = []
-    for article in squad["data"]:
-        title = article.get("title", "").strip()
-        for paragraph in article["paragraphs"]:
-            context = paragraph["context"].strip()
-            for qa in paragraph["qas"]:
-                rows.append({
-                    "id": qa["id"],
-                    "title": title,
-                    "context": context,
-                    "question": qa["question"].strip(),
-                    "answers": {
-                        "answer_start": [a["answer_start"] for a in qa["answers"]],
-                        "text": [a["text"].strip() for a in qa["answers"]],
-                    },
-                })
-    return Dataset.from_list(rows)
+def print_cuda_memory_utilization(rank: int = 0) -> None:
+    """Print CUDA memory allocation in MB for the specified device."""
+    if not torch.cuda.is_available():
+        print("CUDA is not available.")
+        return
+    used = torch.cuda.memory_allocated(rank)
+    print(f"CUDA[{rank}] memory allocated: {used//1024**2} MB.")

@@ -14,14 +14,14 @@ class ModelConfig:
 MODEL_CONFIGS = {
     "llama3-8b-instruct": ModelConfig(
         name="llama3-8b-instruct",
-        vllm_model="meta-llama/Meta-Llama-3-8B-Instruct",
+        vllm_model="meta-llama/Llama-3.1-8B-Instruct",
         system_message="You are a knowledgeable assistant trained to provide accurate and helpful information. Please respond to the user's queries promptly.",
         flag_name="llama3_8b",
         lora_targets=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"],
     ),
     "llama3-70b-instruct": ModelConfig(
         name="llama3-70b-instruct",
-        vllm_model="meta-llama/Meta-Llama-3-70B-Instruct",
+        vllm_model="meta-llama/Llama-3.1-70B-Instruct",
         system_message="You are a knowledgeable assistant trained to provide accurate and helpful information. Please respond to the user's queries promptly.",
         flag_name="llama3_70b",
         lora_targets=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj", "lm_head"],
