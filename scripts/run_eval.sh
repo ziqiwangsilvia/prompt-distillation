@@ -3,8 +3,9 @@
 # Usage: bash run_eval.sh [config/pipeline.yaml] [--metrics-only]
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export PYTHONPATH="${PYTHONPATH:-}:${SCRIPT_DIR}"
+cd "${SCRIPT_DIR}"
 
 METRICS_ONLY=false
 CONFIG="config/pipeline.yaml"

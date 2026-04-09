@@ -4,8 +4,9 @@
 set -euo pipefail
 
 # Ensure project root is on Python path
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export PYTHONPATH="${PYTHONPATH:-}:${SCRIPT_DIR}"
+cd "${SCRIPT_DIR}"
 
 CONFIG="${1:-config/pipeline.yaml}"
 
@@ -50,6 +51,13 @@ print(f'MAX_GRAD_NORM=\"{t.get(\"max_grad_norm\", 1.0)}\"')
 print(f'USE_WANDB=\"{t.get(\"use_wandb\", False)}\"')
 print(f'DEEPSPEED_PATH=\"{t.get(\"deepspeed_path\", \"\")}\"')
 print(f'SYSTEM_PROMPT_PATH=\"{c.get(\"system_prompt_path\", \"\")}\"')
+print(f'TOOLS_SCHEMA_PATH=\"{ta.get(\"tools_schema_path\", \"\")}\"')
+import json as _json
+_topics = q.get('topics', [])
+if _topics:
+    print('TOPICS=' + repr(_json.dumps(_topics)))
+else:
+    print('TOPICS=\"\"')
 ")"
 
 # Resolve HuggingFace model ID and family from base config name
@@ -71,6 +79,7 @@ echo "  Teacher:          ${TEACHER_BASE} (${TEACHER_MODEL})"
 echo "  Student:          ${STUDENT_BASE} (${STUDENT_MODEL})"
 echo "  Dataset:          ${DATASET_FAMILY}/${DATASET}"
 echo "  System prompt:    ${SYSTEM_PROMPT_PATH}"
+echo "  Tools schema:     ${TOOLS_SCHEMA_PATH}"
 echo "  vLLM GPU:         ${VLLM_GPU}"
 echo "  Train GPU:        ${TRAIN_GPU}"
 echo "  Run name:         ${RUN_NAME}"
@@ -115,16 +124,21 @@ trap cleanup EXIT
 
 # Step 1: Generate questions
 echo "[1/6] Generating questions..."
-python3 curriculum/sample_tool_questions.py \
-    --system_prompt_path "${SYSTEM_PROMPT_PATH}" \
-    --vllm_hostname "${VLLM_HOST}" \
-    --base "${TEACHER_BASE}" \
-    --dataset_family "${DATASET_FAMILY}" \
-    --dataset "${DATASET}" \
-    --max_items "${MAX_TRAIN_ITEMS}" \
-    --train_questions "${MAX_TRAIN_ITEMS}" \
-    --tool_batches "${TOOL_BATCHES}" \
+QUESTION_ARGS=(
+    --system_prompt_path "${SYSTEM_PROMPT_PATH}"
+    --vllm_hostname "${VLLM_HOST}"
+    --base "${TEACHER_BASE}"
+    --dataset_family "${DATASET_FAMILY}"
+    --dataset "${DATASET}"
+    --max_items "${MAX_TRAIN_ITEMS}"
+    --train_questions "${MAX_TRAIN_ITEMS}"
+    --tool_batches "${TOOL_BATCHES}"
     --nlp_batches "${NLP_BATCHES}"
+)
+if [ -n "${TOPICS}" ]; then
+    QUESTION_ARGS+=(--topics "${TOPICS}")
+fi
+python3 curriculum/sample_tool_questions.py "${QUESTION_ARGS[@]}"
 
 # Step 2: Convert generated questions into lesson format
 echo "[2/6] Converting questions to lesson format..."
@@ -147,30 +161,40 @@ python3 curriculum/questions_to_exam.py \
 
 # Step 4: Generate teacher answers (lesson)
 echo "[4/6] Generating teacher answers (lesson)..."
-python3 curriculum/generate_teacher_answers.py \
-    --generate_lesson True \
-    --base "${TEACHER_BASE}" \
-    --student_base "${STUDENT_BASE}" \
-    --dataset_family "${DATASET_FAMILY}" \
-    --dataset "${DATASET}" \
-    --question_model "${TEACHER_BASE}" \
-    --train_questions "${MAX_TRAIN_ITEMS}" \
-    --max_items "${MAX_TRAIN_ITEMS}" \
-    --lesson_temp 0.25 \
-    --max_total_tokens 4096 \
+TEACHER_ANSWER_ARGS=(
+    --generate_lesson True
+    --base "${TEACHER_BASE}"
+    --student_base "${STUDENT_BASE}"
+    --dataset_family "${DATASET_FAMILY}"
+    --dataset "${DATASET}"
+    --question_model "${TEACHER_BASE}"
+    --train_questions "${MAX_TRAIN_ITEMS}"
+    --max_items "${MAX_TRAIN_ITEMS}"
+    --lesson_temp 0.25
+    --max_total_tokens 4096
     --vllm_hostname "${VLLM_HOST}"
+)
+if [ -n "${TOOLS_SCHEMA_PATH}" ]; then
+    TEACHER_ANSWER_ARGS+=(--tools_schema_path "${TOOLS_SCHEMA_PATH}")
+fi
+python3 curriculum/generate_teacher_answers.py "${TEACHER_ANSWER_ARGS[@]}"
 
 # Step 5: Generate teacher answers (exam)
 echo "[5/6] Generating teacher answers (exam)..."
-python3 curriculum/generate_teacher_answers.py \
-    --generate_exam True \
-    --base "${TEACHER_BASE}" \
-    --student_base "${STUDENT_BASE}" \
-    --dataset_family "${DATASET_FAMILY}" \
-    --dataset "${DATASET}" \
-    --max_items "${MAX_ITEMS}" \
-    --max_total_tokens 4096 \
+EXAM_ANSWER_ARGS=(
+    --generate_exam True
+    --base "${TEACHER_BASE}"
+    --student_base "${STUDENT_BASE}"
+    --dataset_family "${DATASET_FAMILY}"
+    --dataset "${DATASET}"
+    --max_items "${MAX_ITEMS}"
+    --max_total_tokens 4096
     --vllm_hostname "${VLLM_HOST}"
+)
+if [ -n "${TOOLS_SCHEMA_PATH}" ]; then
+    EXAM_ANSWER_ARGS+=(--tools_schema_path "${TOOLS_SCHEMA_PATH}")
+fi
+python3 curriculum/generate_teacher_answers.py "${EXAM_ANSWER_ARGS[@]}"
 
 # Step 6: Run training on TRAIN_GPU
 echo "[6/6] Training on GPU ${TRAIN_GPU}..."

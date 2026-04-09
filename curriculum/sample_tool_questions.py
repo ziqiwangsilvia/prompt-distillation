@@ -58,14 +58,52 @@ Generate 5 diverse, realistic user messages that the assistant should answer wit
 Format each as:
 <question>user message here</question>"""
 
+TOPIC_TOOL_PROMPT_TEMPLATE = """You are given a system prompt that describes an AI assistant with access to specific tools for a financial app.
+
+<system_prompt>
+{system_prompt}
+</system_prompt>
+
+Focus on this topic: {topic}
+
+Generate 5 diverse, realistic user messages related to the topic above that would require the assistant to call one of its tools. The messages should:
+- Be natural and conversational (how a real customer would talk)
+- Stay focused on the given topic
+- Vary in complexity (simple lookups vs multi-filter requests)
+- Never reference tool names, schemas, or JSON directly
+
+Format each as:
+<question>user message here</question>"""
+
+TOPIC_NLP_PROMPT_TEMPLATE = """You are given a system prompt that describes an AI assistant for a financial app.
+
+<system_prompt>
+{system_prompt}
+</system_prompt>
+
+Focus on this topic: {topic}
+
+Generate 5 diverse, realistic user messages related to the topic above that the assistant should answer with plain conversational advice — NOT by calling any tool. The messages should:
+- Be natural and conversational
+- Stay focused on the given topic
+- Not require looking up any account data — just general or personalised advice
+- Never reference tool names or schemas
+
+Format each as:
+<question>user message here</question>"""
+
 
 def _extract_questions(text: str) -> List[str]:
     return re.findall(r'<question>(.*?)</question>', text, re.DOTALL)
 
 
-def _build_prompt(system_prompt: str, llm: LLM, nlp: bool) -> str:
-    template = NLP_PROMPT_TEMPLATE if nlp else TOOL_PROMPT_TEMPLATE
-    content = template.format(system_prompt=system_prompt)
+def _build_prompt(system_prompt: str, llm: LLM, nlp: bool, topic: str = "") -> str:
+    if topic:
+        template = TOPIC_NLP_PROMPT_TEMPLATE if nlp else TOPIC_TOOL_PROMPT_TEMPLATE
+        content = template.format(system_prompt=system_prompt, topic=topic)
+    else:
+        template = NLP_PROMPT_TEMPLATE if nlp else TOOL_PROMPT_TEMPLATE
+        content = template.format(system_prompt=system_prompt)
     messages = [Message(Role.USER, content)]
     return llm.messages_to_prompt(messages)
 
@@ -106,16 +144,22 @@ async def _sample_questions(
 
 
 def _generate_and_split(train_file, eval_file, t_batches, n_batches, needed_calls,
-                        eval_ratio, system_prompt, llm, client, cfg, extra_body, temperature, max_tokens):
+                        eval_ratio, system_prompt, llm, client, cfg, extra_body, temperature, max_tokens,
+                        topics=None):
     if train_file.exists() and eval_file.exists():
         print(f"Both {train_file} and {eval_file} already exist — skipping.", flush=True)
         return
 
-    total_batches = t_batches + n_batches
-    prompts = (
-        [_build_prompt(system_prompt, llm, nlp=False) for _ in range(t_batches)]
-        + [_build_prompt(system_prompt, llm, nlp=True) for _ in range(n_batches)]
-    )
+    if topics:
+        prompts = (
+            [_build_prompt(system_prompt, llm, nlp=False, topic=topics[i % len(topics)]) for i in range(t_batches)]
+            + [_build_prompt(system_prompt, llm, nlp=True, topic=topics[i % len(topics)]) for i in range(n_batches)]
+        )
+    else:
+        prompts = (
+            [_build_prompt(system_prompt, llm, nlp=False) for _ in range(t_batches)]
+            + [_build_prompt(system_prompt, llm, nlp=True) for _ in range(n_batches)]
+        )
 
     print(f"Generating questions: {t_batches} tool + {n_batches} NLP batches", flush=True)
 
@@ -169,6 +213,7 @@ def main(
     tool_batches: int = 10,
     nlp_batches: int = 5,
     eval_ratio: float = 0.2,
+    topics: List[str] = None,
 ) -> None:
     system_prompt = Path(system_prompt_path).read_text().strip()
     cfg = get_model_config(base)
@@ -192,6 +237,7 @@ def main(
         eval_ratio,
         system_prompt=system_prompt, llm=llm, client=client, cfg=cfg,
         extra_body=extra_body, temperature=temperature, max_tokens=max_tokens,
+        topics=topics,
     )
 
 

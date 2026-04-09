@@ -66,34 +66,40 @@ class LLM:
             "adapter_ids": [str(adapter_id) for adapter_id in self.adapter_ids],
         }
 
-    def messages_to_prompt(self, messages: List[Message], placeholder: bool = False, no_template: bool = False) -> str:
+    def messages_to_prompt(self, messages: List[Message], placeholder: bool = False, no_template: bool = False, tools: Optional[list] = None) -> str:
         if self.opening_message and not no_template:
             messages = [self.opening_message] + messages
         if no_template:
             return " ".join([m.content for m in messages])
         if self.model_family == "llama":
-            return self.llama_messages_to_prompt(messages, placeholder=placeholder)
+            return self.llama_messages_to_prompt(messages, placeholder=placeholder, tools=tools)
         elif self.model_family == "qwen":
-            return self.qwen_messages_to_prompt(messages, placeholder=placeholder)
+            return self.qwen_messages_to_prompt(messages, placeholder=placeholder, tools=tools)
         raise ValueError(f"Unknown model family: {self.model_family}")
 
-    def qwen_messages_to_prompt(self, messages: List[Message], placeholder: bool = False) -> str:
+    def qwen_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None) -> str:
         new_messages = []
         for i, msg in enumerate(messages):
             if msg.role not in {Role.SYSTEM, Role.USER}:
                 raise ValueError(f"Wrong message role {msg.role}.")
             content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
             new_messages.append({"role": msg.role.value, "content": content})
-        return self.tokenizer.apply_chat_template(new_messages, tokenize=False, add_generation_prompt=True)
+        kwargs = {"tokenize": False, "add_generation_prompt": True}
+        if tools:
+            kwargs["tools"] = tools
+        return self.tokenizer.apply_chat_template(new_messages, **kwargs)
 
-    def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False) -> str:
+    def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None) -> str:
         new_messages = []
         for i, msg in enumerate(messages):
             if msg.role not in {Role.SYSTEM, Role.USER}:
                 raise ValueError(f"Wrong message role {msg.role}.")
             content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
             new_messages.append({"role": msg.role.value, "content": content})
-        return self.tokenizer.apply_chat_template(new_messages, tokenize=False, add_generation_prompt=True)
+        kwargs = {"tokenize": False, "add_generation_prompt": True}
+        if tools:
+            kwargs["tools"] = tools
+        return self.tokenizer.apply_chat_template(new_messages, **kwargs)
 
     def tokenize(self, seq: str) -> torch.Tensor:
         return self.tokenizer.encode(seq, add_special_tokens=False, return_tensors="pt")

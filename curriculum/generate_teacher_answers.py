@@ -1,4 +1,5 @@
 # %%
+import json
 import os
 import re
 import time
@@ -28,6 +29,7 @@ def generate_prompt(
     lesson: Lesson,
     max_total_tokens: int,
     max_new_tokens: int,
+    tools: list = None,
 ) -> Tuple[List[Tuple[str, int]], List[Exercise]]:
     """Generate prompts and exercises from a lesson."""
     prompts = []
@@ -49,7 +51,7 @@ def generate_prompt(
         prompt = ex.teacher_prompt
         messages = [Message(Role.USER, prompt)]
         messages = merge_messages(messages)
-        prompt = llm.messages_to_prompt(messages)
+        prompt = llm.messages_to_prompt(messages, tools=tools)
         prompt = prompt.replace("&lt;", "<").replace("&gt;", ">")
 
         prompts.append((prompt, max_tokens_to_generate))
@@ -161,8 +163,16 @@ def main(
     chunk_size: int = 10000,
     verbose: bool = False,
     vllm_hostname: str = "",
+    tools_schema_path: str = "",
 ):
     assert not (generate_lesson and generate_exam), "The code doesn't support generating lesson and exam simultaneously"
+    # Load tools schema if provided (passed to teacher, not student)
+    tools = None
+    if tools_schema_path:
+        with open(tools_schema_path) as f:
+            tools = json.load(f)
+        print(f"Loaded {len(tools)} tool definitions from {tools_schema_path}", flush=True)
+
     # Setup models
     llm, vllm_client = setup_models(base, vllm_hostname)
     model_flags = create_model_flags(base)
@@ -207,7 +217,7 @@ def main(
     print(f"Number of lessons: {len(lessons)}", flush=True)
 
     for lesson_id, lesson in lessons.items():
-        p, e = generate_prompt(llm, lesson, max_total_tokens, max_new_tokens)
+        p, e = generate_prompt(llm, lesson, max_total_tokens, max_new_tokens, tools=tools)
         prompts += p
         exercises += e
 
