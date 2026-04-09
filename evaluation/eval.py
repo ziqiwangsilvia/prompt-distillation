@@ -138,6 +138,8 @@ def run_inference(
             pass
         return {"type": "text"}
 
+    GUARD_PHRASE = "sorry, i cannot help with this"
+
     n = len(results)
     when2call_scores = []
     pickup_scores = []
@@ -148,10 +150,24 @@ def run_inference(
     var_hallucination_scores = []
     var_additional_scores = []
     exact_scores = []
+    guard_total = 0
+    guard_correct = 0
+    guard_pred_total = 0
 
     for r in results:
         gt = _to_metric_format(r["reference"] or "")
         pred = _to_metric_format(r["prediction"])
+
+        ref_text = (r["reference"] or "").strip().lower()
+        pred_text = r["prediction"].strip().lower()
+        ref_is_guard = GUARD_PHRASE in ref_text
+
+        if ref_is_guard:
+            guard_total += 1
+            if GUARD_PHRASE in pred_text:
+                guard_correct += 1
+        if GUARD_PHRASE in pred_text:
+            guard_pred_total += 1
 
         when2call_scores.append(get_when2call(gt, pred))
 
@@ -177,7 +193,7 @@ def run_inference(
 
     tool_total = len(exact_scores)
     print(f"\n{'='*50}")
-    print(f"METRICS ({n} examples, {tool_total} tool calls, {n - tool_total} text)")
+    print(f"METRICS ({n} examples, {tool_total} tool calls, {n - tool_total} text, {guard_total} guarded)")
     print(f"{'='*50}")
     print(f"  When2Call:              {_avg(when2call_scores):.1f}%")
     if tool_total:
@@ -189,6 +205,11 @@ def run_inference(
         print(f"  Var Hallucination:     {_avg(var_hallucination_scores):.1f}%")
         print(f"  Var Additional:        {_avg(var_additional_scores):.1f}%")
         print(f"  Exact Match:           {_avg(exact_scores):.1f}%")
+    if guard_total:
+        guard_recall = guard_correct / guard_total * 100
+        guard_precision = guard_correct / guard_pred_total * 100 if guard_pred_total else 0
+        print(f"  Guard Precision:       {guard_precision:.1f}% ({guard_correct}/{guard_pred_total})")
+        print(f"  Guard Recall:          {guard_recall:.1f}% ({guard_correct}/{guard_total})")
     print(f"\nSaved {n} results to {output_file}")
 
 
