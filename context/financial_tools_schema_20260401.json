@@ -1,0 +1,363 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "show_pie_chart",
+      "description": "Show a pie chart of spending or income, broken down by category or payee.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "data_type": {
+            "enum": ["spending", "income"],
+            "type": "string"
+          },
+          "time_range": {
+            "enum": ["this_month", "last_month",  "last_3_months",  "last_6_months", "this_year", "last_year"],
+            "type": "string"
+          },
+          "group_by": {
+            "enum": ["category", "payee"],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max slices",
+            "type": "integer"
+          },
+          "categories": {
+            "anyOf": [
+              { "items": { "type": "string" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "description": "Filter to these categories"
+          },
+          "payees": {
+            "anyOf": [
+              { "items": { "type": "string" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "description": "Filter to these payees"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "spending" },
+                "group_by": { "const": "category" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "categories": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "Groceries", "Restaurants", "Coffee & Bars", "Public transport",
+                          "Fuel", "Taxi & Car sharing", "Rent/Mortgage", "Utilities",
+                          "Home improvement", "Clothing & Shoes", "Electronics", "Home & Garden",
+                          "Subscriptions", "Hobbies", "Events", "Insurance", "Bank fees",
+                          "Loans", "Pharmacy", "Sport & Fitness", "Medical", "Hair & Beauty",
+                          "Spa & Wellness"
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "income" },
+                "group_by": { "const": "category" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "categories": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": ["Salary"]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "spending" },
+                "group_by": { "const": "payee" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "payees": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "ASOS", "AXA", "Admiral Insurance", "Aldi", "Amazon Digital",
+                          "Amazon Prime", "Apple Store", "Argos", "Art Supplies", "Aviva",
+                          "B&Q", "BP", "Beauty Salon", "Bolt", "Boots", "British Gas",
+                          "Bupa Healthcare", "Champneys", "CityMapper", "Costa Coffee",
+                          "Currys", "David Lloyd", "Day Spa", "Dental Practice", "Dishoom",
+                          "Disney+", "Dunelm", "Enterprise Car", "Esso", "Eventbrite",
+                          "FreeNow", "Games Workshop", "Garden Center", "Golf Club", "Gymshark",
+                          "H&M", "Homebase", "IKEA", "John Lewis", "Lidl", "Lloyds Pharmacy",
+                          "Local Barber", "Local Italian", "Massage Center", "Monthly Account Fee",
+                          "Mortgage_Payment_Direct", "Nandos", "Netflix", "Nike Store", "O2 Arena",
+                          "Octopus Energy", "Optical Express", "Overdraft Interest",
+                          "Personal Loan Pymt", "Pub", "PureGym", "RE_MGMT_SVC", "Sainsburys",
+                          "Selfridges", "Shell", "Sky Digital", "Spotify", "Starbucks",
+                          "Student Loan Co", "Superdrug", "TFL.gov.uk", "Tesco", "Texaco",
+                          "Thames Water", "The Alchemist", "Ticketmaster", "Toni & Guy",
+                          "Trainline", "Uber", "Vitality", "Wagamama", "Waitrose", "Wayfair", "ZARA"
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "income" },
+                "group_by": { "const": "payee" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "payees": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": ["EMPLOYER_PAYROLL"]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "show_stacked_bar_chart",
+      "description": "Show a stacked bar chart of spending or income over time, broken down by category or payee.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "data_type": {
+            "enum": ["spending", "income"],
+            "type": "string"
+          },
+          "time_range": {
+            "enum": ["this_month", "last_month",  "last_3_months",  "last_6_months", "this_year", "last_year"],
+            "type": "string"
+          },
+          "group_by": {
+            "enum": ["category", "payee"],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max categories per bar",
+            "type": "integer"
+          },
+          "categories": {
+            "anyOf": [
+              { "items": { "type": "string" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "description": "Filter to these categories"
+          },
+          "payees": {
+            "anyOf": [
+              { "items": { "type": "string" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "description": "Filter to these payees"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "spending" },
+                "group_by": { "const": "category" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "categories": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "Groceries", "Restaurants", "Coffee & Bars", "Public transport",
+                          "Fuel", "Taxi & Car sharing", "Rent/Mortgage", "Utilities",
+                          "Home improvement", "Clothing & Shoes", "Electronics", "Home & Garden",
+                          "Subscriptions", "Hobbies", "Events", "Insurance", "Bank fees",
+                          "Loans", "Pharmacy", "Sport & Fitness", "Medical", "Hair & Beauty",
+                          "Spa & Wellness"
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "income" },
+                "group_by": { "const": "category" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "categories": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": ["Salary"]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "spending" },
+                "group_by": { "const": "payee" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "payees": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "ASOS", "AXA", "Admiral Insurance", "Aldi", "Amazon Digital",
+                          "Amazon Prime", "Apple Store", "Argos", "Art Supplies", "Aviva",
+                          "B&Q", "BP", "Beauty Salon", "Bolt", "Boots", "British Gas",
+                          "Bupa Healthcare", "Champneys", "CityMapper", "Costa Coffee",
+                          "Currys", "David Lloyd", "Day Spa", "Dental Practice", "Dishoom",
+                          "Disney+", "Dunelm", "Enterprise Car", "Esso", "Eventbrite",
+                          "FreeNow", "Games Workshop", "Garden Center", "Golf Club", "Gymshark",
+                          "H&M", "Homebase", "IKEA", "John Lewis", "Lidl", "Lloyds Pharmacy",
+                          "Local Barber", "Local Italian", "Massage Center", "Monthly Account Fee",
+                          "Mortgage_Payment_Direct", "Nandos", "Netflix", "Nike Store", "O2 Arena",
+                          "Octopus Energy", "Optical Express", "Overdraft Interest",
+                          "Personal Loan Pymt", "Pub", "PureGym", "RE_MGMT_SVC", "Sainsburys",
+                          "Selfridges", "Shell", "Sky Digital", "Spotify", "Starbucks",
+                          "Student Loan Co", "Superdrug", "TFL.gov.uk", "Tesco", "Texaco",
+                          "Thames Water", "The Alchemist", "Ticketmaster", "Toni & Guy",
+                          "Trainline", "Uber", "Vitality", "Wagamama", "Waitrose", "Wayfair", "ZARA"
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "data_type": { "const": "income" },
+                "group_by": { "const": "payee" }
+              },
+              "required": ["data_type", "group_by"]
+            },
+            "then": {
+              "properties": {
+                "payees": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string",
+                        "enum": ["EMPLOYER_PAYROLL"]
+                      },
+                      "type": "array"
+                    },
+                    { "type": "null" }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "show_line_chart",
+      "description": "Show a line chart of balance over time or cash flow (income, spending, net) over time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "chart_type": {
+            "description": "Type of line chart to show",
+            "enum": ["balance", "cash_flow"],
+            "type": "string"
+          },
+          "time_range": {
+            "enum": ["this_month", "last_month",  "last_3_months",  "last_6_months", "this_year", "last_year"],
+            "type": "string"
+          },
+          "by_account": {
+            "description": "Show per-account breakdown (balance only)",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+]
