@@ -208,9 +208,7 @@ __marimo__/
 
 # misc
 wandb
-data/
 questions/
-outputs/
 checkpoints/
 output/
 curriculum/*xml

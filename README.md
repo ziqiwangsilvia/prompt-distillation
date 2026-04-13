@@ -23,13 +23,11 @@ This repository contains the code necessary to reproduce the main results of our
 ## Installation
 
 ```bash
-# Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -e .
+uv sync
 ```
 
 ## Usage
