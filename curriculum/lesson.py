@@ -72,7 +72,7 @@ def read_lessons(filepath: os.PathLike, error_if_not_found: bool = True) -> Dict
             print(f"File {filepath} not found")
             return {}
     return OrderedDict(
-        (d["id"], Lesson(d)) for d in data["lessons"]
+        (d["id"], Lesson(d)) for d in data
     )
 
 

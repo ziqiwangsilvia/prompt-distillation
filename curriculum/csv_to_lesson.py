@@ -49,7 +49,7 @@ def create_lessons(
                 "material": material,
                 "exercises": [{"exercise": exercise}],
             })
-    return {"lessons": lessons}
+    return lessons
 
 
 def main(

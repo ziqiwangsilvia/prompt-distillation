@@ -46,7 +46,7 @@ def create_lessons(
             "exercises": [{"exercise": exercise}],
         })
 
-    return {"lessons": lessons}
+    return lessons
 
 
 def create_lessons_from_csv(
@@ -75,7 +75,7 @@ def create_lessons_from_csv(
                 "exercises": [{"exercise": exercise}],
             })
 
-    return {"lessons": lessons}
+    return lessons
 
 
 def main(
