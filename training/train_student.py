@@ -224,17 +224,17 @@ def train(
     logit_train_files, logit_val_files = data
     token_train_files, token_val_files = data
 
-    logit_train_ds = _init_logit_train_dataset(base_llm, logit_train_files, hp)
-    token_train_ds = _init_token_train_dataset(base_llm, token_train_files, hp)
-    logit_val_ds = StudentTeacherDataset(base_llm, logit_val_files, datapath=hp.datapath)
-    token_val_ds = TeacherDataset(base_llm, token_val_files, datapath=hp.datapath) 
+    logit_train_ds = _init_logit_train_dataset(base_llm, logit_train_files, hp) if hp.logit_loss_weight else None
+    token_train_ds = _init_token_train_dataset(base_llm, token_train_files, hp) if hp.token_loss_weight else None
+    logit_val_ds = StudentTeacherDataset(base_llm, logit_val_files, datapath=hp.datapath) if hp.logit_loss_weight and logit_val_files else None
+    token_val_ds = TeacherDataset(base_llm, token_val_files, datapath=hp.datapath) if hp.token_loss_weight and token_val_files else None
 
     logit_loader = _make_loader(
         logit_train_ds,
         hp.logit_loss_micro_batch_size,
         partial(logit_train_ds.collate_fn, padding_value=PADDING_VALUE, llm=base_llm),
         shuffle=True,
-    )
+    ) if hp.logit_loss_weight else None
 
     token_loader = _make_loader(
         token_train_ds,
@@ -245,40 +245,37 @@ def train(
             llm=base_llm,
             max_total_length=hp.max_total_length,
         ),
-        # InfiniteSampler takes care of shuffling
         sampler=InfiniteSampler(len(token_train_ds))
-    )
+    ) if hp.token_loss_weight else None
 
     # Validation loaders
     logit_val_loader = (
-        None
-        if not logit_val_files
-        else _make_loader(
+        _make_loader(
             logit_val_ds,
             hp.logit_loss_micro_batch_size,
             partial(
-                StudentTeacherDataset.collate_fn,  # type: ignore
+                StudentTeacherDataset.collate_fn,
                 padding_value=PADDING_VALUE,
                 llm=base_llm,
             ),
-        )
+        ) if logit_val_ds else None
     )
     token_val_loader = (
-        None
-        if not token_val_files
-        else _make_loader(
+        _make_loader(
             token_val_ds,
             hp.token_loss_micro_batch_size,
             partial(
-                token_val_ds.collate_fn,  # type: ignore
+                token_val_ds.collate_fn,
                 padding_value=PADDING_VALUE,
                 llm=base_llm,
             ),
-        )
+        ) if token_val_ds else None
     )
 
     if hp.verbose:
-        print(f"Training data: token loss: {len(token_train_ds)} examples, logit loss: {len(logit_train_ds)} examples\n\n")
+        token_count = len(token_train_ds) if token_train_ds else 0
+        logit_count = len(logit_train_ds) if logit_train_ds else 0
+        print(f"Training data: token loss: {token_count} examples, logit loss: {logit_count} examples\n\n")
 
     # Prepare with accelerator
     logit_loader, token_loader, logit_val_loader, token_val_loader = accelerator.prepare(

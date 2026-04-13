@@ -1,10 +1,8 @@
-# %%
 import json
 import os
 import re
 import time
 import warnings
-import xml.etree.ElementTree as ET
 from typing import List, Tuple, Dict
 
 import torch
@@ -20,8 +18,7 @@ from models.configs import create_model_flags, MODEL_CONFIGS, get_model_config
 from models.tool_call_format import convert_tool_call_format
 from models.utils import generate_sampling_params
 from curriculum.lesson import read_lessons, Lesson, Exercise
-from curriculum.exercise_with_answers import ExerciseWithAnswers, Choice, xml_dump
-from training.utils import clean_xml_content
+from curriculum.exercise_with_answers import ExerciseWithAnswers, Choice
 
 
 def generate_prompt(
@@ -64,7 +61,7 @@ def _is_mixed_response(text: str) -> bool:
     """Detect responses that mix text with a tool call."""
     tc = re.search(r'<tool_call>\s*\{.*\}\s*(</tool_call>)?', text, re.DOTALL)
     if tc is None:
-        return False  # pure text, no tool call
+        return False
     before = text[:tc.start()].strip()
     after = text[tc.end():].strip()
     return bool(before or after)
@@ -83,7 +80,6 @@ def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
             print(f"  Skipping mixed response: {answer[:80]}...")
             continue
 
-        # Strip stop token if present (vLLM may or may not include it)
         raw_tokens = llm.tokenize(answer)
         terminators = llm.get_terminators()
         if raw_tokens.numel() > 0 and raw_tokens[0, -1] in terminators:
@@ -95,30 +91,33 @@ def process_answers(llm: LLM, exercise: Exercise, answers: List[str],
         choice = Choice(answer)
         answer_choices.append(choice)
 
-    messages = [Message(Role.USER, exercise.teacher_prompt_with_tips_tags)]
+    # Store material as system message, question as user message
+    messages = []
+    if exercise.material:
+        messages.append(Message(Role.SYSTEM, exercise.material))
+    messages.append(Message(Role.USER, exercise.student_prompt))
     return ExerciseWithAnswers(
-        messages, 
-        answer_choices, 
-        model_answer=exercise.model_answer, 
-        grading_str=exercise.grading_str
+        messages,
+        answer_choices,
+        model_answer=exercise.model_answer,
+        grading_str=exercise.grading_str,
     )
 
 
-def save_to_xml(lesson_id: str, exercises_with_answers: List[ExerciseWithAnswers],
-                temperature: float, n_choices: int, model_flags: Dict[str, bool]):
-    """Save exercises with answers to XML file."""
-    root = ET.Element("exercises_with_answers")
-    ET.SubElement(root, "temperature", value=str(temperature))
-
-    for ex in exercises_with_answers:
-        ex.to_xml(root)
+def save_answers(lesson_id: str, exercises_with_answers: List[ExerciseWithAnswers],
+                 temperature: float, n_choices: int, model_flags: Dict[str, bool]):
+    """Save exercises with answers to JSON file."""
+    data = {
+        "temperature": temperature,
+        "exercises_with_answers": [ex.to_dict() for ex in exercises_with_answers],
+    }
 
     fname = generate_augmented_filename(lesson_id, n_choices, temperature, model_flags)
     path = DATA_PATH / fname
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(path, "w") as file:
-        xml_dump(root, file)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
     print(f"Saved to {path}")
 
@@ -166,42 +165,33 @@ def main(
     tools_schema_path: str = "",
 ):
     assert not (generate_lesson and generate_exam), "The code doesn't support generating lesson and exam simultaneously"
-    # Load tools schema if provided (passed to teacher, not student)
     tools = None
     if tools_schema_path:
         with open(tools_schema_path) as f:
             tools = json.load(f)
         print(f"Loaded {len(tools)} tool definitions from {tools_schema_path}", flush=True)
 
-    # Setup models
     llm, vllm_client = setup_models(base, vllm_hostname)
     model_flags = create_model_flags(base)
 
-    # Setup processing modes
     if generate_lesson:
-        xml_name = generate_lesson_filename(
+        json_name = generate_lesson_filename(
             dataset_family, dataset, variant, question_model, train_questions, question_temperature, max_items
         )
     if generate_exam:
-        xml_name = generate_exam_filename(
+        json_name = generate_exam_filename(
             dataset_family, dataset, variant, max_items
         )
 
     temperature = lesson_temp if generate_lesson else exam_temp
     num_choices = lesson_num_choices if generate_lesson else exam_num_choices
 
-    # Setup sampling parameters
     sampling_params = generate_sampling_params(max_total_tokens, temperature)
-    print(f"Processing {xml_name}", flush=True)
+    print(f"Processing {json_name}", flush=True)
 
-    # Read lessons
-    try:
-        lessons = read_lessons(xml_name)
-    except ET.ParseError:
-        cleaned_xml_filename = clean_xml_content(xml_name)
-        lessons = read_lessons(cleaned_xml_filename)
+    lessons = read_lessons(json_name)
 
-    # Check if output already exists before expensive generation
+    # Check if output already exists
     first_lesson_id = next(iter(lessons))
     output_fname = generate_augmented_filename(
         first_lesson_id.rsplit('_', 1)[0], num_choices, temperature, model_flags
@@ -211,7 +201,6 @@ def main(
         print(f"{output_path} already exists — skipping.", flush=True)
         return
 
-    # Generate prompts and exercises
     prompts = []
     exercises = []
     print(f"Number of lessons: {len(lessons)}", flush=True)
@@ -224,7 +213,6 @@ def main(
     assert len(prompts) == len(exercises)
     print(f"Number of prompts: {len(prompts)}", flush=True)
 
-    # Generate answers
     start_time = time.time()
     prompts_only = [p for p, _ in prompts]
     answers = []
@@ -254,7 +242,6 @@ def main(
     assert len(prompts) == len(exercises) == len(answers)
     assert len(answers[0]) == num_choices
 
-    # Process answers
     teacher_family = get_model_family(get_model_config(base).vllm_model)
     student_family = get_model_family(get_model_config(student_base).vllm_model) if student_base else teacher_family
     exercises_with_answers = []
@@ -265,11 +252,10 @@ def main(
         else:
             print(f"  Dropped exercise with 0 valid answers")
 
-    # Save results
-    save_to_xml(
-        lesson_id.rsplit('_', 1)[0], 
-        exercises_with_answers, 
-        temperature, 
+    save_answers(
+        lesson_id.rsplit('_', 1)[0],
+        exercises_with_answers,
+        temperature,
         num_choices,
         model_flags,
     )

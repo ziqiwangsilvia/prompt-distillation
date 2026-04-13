@@ -30,11 +30,11 @@ def generate_exam_name(
 
 def generate_lesson_filename(*args, **kwargs) -> str:
     lesson_name = generate_lesson_name(*args, **kwargs)
-    return f"output/lessons/lesson_{lesson_name}.xml"
+    return f"output/lessons/lesson_{lesson_name}.json"
 
 def generate_exam_filename(*args, **kwargs) -> str:
     exam_name = generate_exam_name(*args, **kwargs)
-    return f"output/exams/exam_{exam_name}.xml"
+    return f"output/exams/exam_{exam_name}.json"
 
 def generate_question_path(
     dataset_family: str,
@@ -56,10 +56,10 @@ def generate_augmented_filename(
     model_flags: Optional[Dict[str, bool]] = None,
     partition_idx: Optional[int] = None,
     partition_type: Optional[str] = None,
-    suffix: str = "xml",
+    suffix: str = "json",
 ) -> Path:
     """
-    Create an augmented filename for training/validation/output XML files.
+    Create an augmented filename for training/validation/output files.
     """
     fname = lesson_filename
     if n_choices != 1:

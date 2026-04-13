@@ -112,7 +112,6 @@ def main(
         model_flags=lesson_model_flags,
         partition_idx=partition_idx,
         partition_type=partition_type,
-        suffix="xml",
     )
 
     val_file = generate_augmented_filename(
@@ -120,7 +119,6 @@ def main(
         n_choices=exam_num_choices,
         temperature=exam_temp,
         model_flags=exam_model_flags,
-        suffix="xml",
     )
 
     if validate:

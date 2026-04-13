@@ -1,6 +1,5 @@
 from enum import Enum
 from typing import Optional, Set, List
-import xml.etree.ElementTree as ET
 
 QUESTION_PLACEHOLDER = "[[QUESTION_PLACEHOLDER]]"
 
@@ -40,19 +39,19 @@ class Message:
         self.short_content = short_content or ""
 
     def copy(self) -> "Message":
-        """Return a copy of the message."""
         return Message(self.role, self.content, self.tags, self.short_content)
 
     def short_version(self) -> "Message":
-        """Return a message with the short content."""
         return Message(self.role, self.short_content, self.tags, self.short_content)
 
     @classmethod
-    def from_xml_element(cls, element: ET.Element) -> "Message":
-        """Parse Message from XML element."""
-        role = Role.from_value(element.get("role"))
-        content = element.text.strip()
-        return Message(role, content)
+    def from_dict(cls, d: dict) -> "Message":
+        """Parse Message from a dict."""
+        role = Role.from_value(d["role"])
+        content = d["content"].strip()
+        tags = set(d.get("tags", []))
+        short_content = d.get("short_content")
+        return Message(role, content, tags, short_content)
 
     def _header(self) -> str:
         name = self.__class__.__name__
@@ -67,29 +66,16 @@ class Message:
         return self.__str__()
 
     def dump(self) -> dict:
-        """Return a dict with role and content."""
         return {
             "role": self.role.value,
             "content": self.content or "",
         }
-
-    def to_xml(self, parent: Optional[ET.Element] = None) -> ET.Element:
-        """Convert the message to an XML element (add to parent if given)."""
-        if parent is None:
-            msg_element = ET.Element("message")
-        else:
-            msg_element = ET.SubElement(parent, "message")
-        msg_element.set("role", self.role.value)
-        msg_element.text = self.content
-        return msg_element
 
     def to_dict(self) -> dict:
         """Return the message as a dict (for serialization)."""
         return {
             "role": self.role.value,
             "content": self.content or "",
-            "tags": list(self.tags),
-            "short_content": self.short_content,
         }
 
 

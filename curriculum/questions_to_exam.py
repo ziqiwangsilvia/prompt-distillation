@@ -1,24 +1,23 @@
 import csv
+import json
 import os
-from xml.etree.ElementTree import Element, SubElement, tostring
-from typing import Literal, Optional
+from typing import Optional
 
 from datasets import load_dataset
 
 from data.naming import generate_exam_filename, generate_exam_name, generate_question_path
 from data.loading import load_squadshifts
-from curriculum.csv_to_lesson import prettify
 from evaluation.utils import get_prompt_context
 
 
-def create_xml(
+def create_lessons(
     dataset_family: str,
     dataset: str,
     max_items: int,
     variant: str = "default",
-) -> str:
-    """Create an XML exam file from a HuggingFace dataset, supporting squadshifts/hotpotqa and default/cot formats."""
-    lessons = Element('lessons')
+) -> dict:
+    """Create a lessons dict from a HuggingFace dataset."""
+    lessons = []
 
     if dataset_family == "squadshifts":
         hf_dataset = load_squadshifts(dataset)
@@ -34,37 +33,31 @@ def create_xml(
         exercise = item['question']
         context = get_prompt_context(item, dataset_family)
 
-        lesson = SubElement(
-            lessons, 'lesson',
-            id=generate_exam_name(dataset_family, dataset, variant, max_items, i)
-        )
-        material = SubElement(lesson, 'material')
         if variant == "cot":
-            material.text = f"{context}\n\nPlease answer the following question. Reason step by step.\n"
+            material = f"{context}\n\nPlease answer the following question. Reason step by step.\n"
         elif variant == "default":
-            material.text = context
+            material = context
         else:
             raise ValueError(f"Unknown format: {variant}")
 
-        ex_element = SubElement(lesson, 'exercise')
-        ex_element.text = exercise
+        lessons.append({
+            "id": generate_exam_name(dataset_family, dataset, variant, max_items, i),
+            "material": material,
+            "exercises": [{"exercise": exercise}],
+        })
 
-    try:
-        return prettify(lessons)
-    except Exception:
-        print(f"Failure to prettify output for {dataset_family=}, {dataset=}")
-        return tostring(lessons, 'unicode')
+    return {"lessons": lessons}
 
 
-def create_xml_from_csv(
+def create_lessons_from_csv(
     csv_path: str,
     dataset_family: str,
     dataset: str,
     max_items: int,
     variant: str = "default",
-) -> str:
-    """Create an XML exam file from a generated eval CSV."""
-    lessons = Element('lessons')
+) -> dict:
+    """Create a lessons dict from a generated eval CSV."""
+    lessons = []
 
     with open(csv_path, newline='', encoding='utf-8') as f:
         reader = csv.reader(f, delimiter=';', quoting=csv.QUOTE_NONE)
@@ -76,20 +69,13 @@ def create_xml_from_csv(
             if not exercise:
                 continue
 
-            lesson = SubElement(
-                lessons, 'lesson',
-                id=generate_exam_name(dataset_family, dataset, variant, max_items, i)
-            )
-            material = SubElement(lesson, 'material')
-            material.text = context
-            ex_element = SubElement(lesson, 'exercise')
-            ex_element.text = exercise
+            lessons.append({
+                "id": generate_exam_name(dataset_family, dataset, variant, max_items, i),
+                "material": context,
+                "exercises": [{"exercise": exercise}],
+            })
 
-    try:
-        return prettify(lessons)
-    except Exception:
-        print(f"Failure to prettify output for {csv_path}")
-        return tostring(lessons, 'unicode')
+    return {"lessons": lessons}
 
 
 def main(
@@ -98,13 +84,12 @@ def main(
     max_items: int = 20,
     variant: str = "default",
     eval_csv_path: str = "",
-    # These are only needed to locate the eval CSV when eval_csv_path is not set
     base: str = "llama3-8b-instruct",
     train_questions: int = 200,
     temperature: float = 1.5,
     max_train_items: int = 1,
 ) -> None:
-    """Create an XML file for exam questions."""
+    """Create a JSON file for exam questions."""
     output_dir = generate_exam_filename(dataset_family, dataset, variant, max_items)
     os.makedirs(os.path.dirname(output_dir), exist_ok=True)
     if os.path.exists(output_dir):
@@ -112,9 +97,8 @@ def main(
         return
 
     if dataset_family in ("squadshifts", "hotpotqa"):
-        xml_output = create_xml(dataset_family, dataset, max_items, variant)
+        data = create_lessons(dataset_family, dataset, max_items, variant)
     else:
-        # Find eval CSV
         if not eval_csv_path:
             train_path = generate_question_path(
                 dataset_family, dataset, base, train_questions, temperature, max_train_items,
@@ -123,12 +107,12 @@ def main(
         if not os.path.exists(eval_csv_path):
             raise FileNotFoundError(f"Eval CSV not found: {eval_csv_path}. Run sample_tool_questions.py first.")
         print(f"Reading eval questions from {eval_csv_path}")
-        xml_output = create_xml_from_csv(eval_csv_path, dataset_family, dataset, max_items, variant)
+        data = create_lessons_from_csv(eval_csv_path, dataset_family, dataset, max_items, variant)
 
     print(f"Processing {dataset_family=}, {dataset=}, {variant=}, {max_items=}")
     with open(output_dir, 'w', encoding='utf-8') as f:
-        f.write(xml_output)
-    print(f"XML written to {output_dir}")
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"JSON written to {output_dir}")
 
 
 if __name__ == "__main__":

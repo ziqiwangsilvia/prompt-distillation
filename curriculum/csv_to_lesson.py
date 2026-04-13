@@ -1,17 +1,10 @@
 import argparse
 import csv
-import itertools
+import json
 import os
-from xml.etree.ElementTree import Element, SubElement, tostring
-from xml.dom import minidom
 
 from data.naming import generate_question_path, generate_lesson_name, generate_lesson_filename
 
-def prettify(elem: Element) -> str:
-    """Return a pretty-printed XML string for the Element."""
-    rough_string = tostring(elem, 'utf-8')
-    reparsed = minidom.parseString(rough_string)
-    return reparsed.toprettyxml(indent="")
 
 def remove_nul_characters(filename: str) -> str:
     """Remove NUL characters from file, write to a temp file, and return its path."""
@@ -24,7 +17,7 @@ def remove_nul_characters(filename: str) -> str:
     return temp_filename
 
 
-def create_xml(
+def create_lessons(
     dataset_family: str,
     dataset: str,
     input_path: str,
@@ -33,9 +26,9 @@ def create_xml(
     temperature: float,
     max_items: int,
     variant: str
-) -> str:
-    """Read CSV, create XML lessons, and return XML as string."""
-    lessons = Element('lessons')
+) -> dict:
+    """Read CSV and create lessons dict."""
+    lessons = []
     cleaned_input_path = remove_nul_characters(input_path)
     print(cleaned_input_path)
     with open(cleaned_input_path, newline='') as csvfile:
@@ -45,22 +38,18 @@ def create_xml(
             context = ';'.join(row[1:])
             if not exercise:
                 continue
-            lesson = SubElement(
-                lessons, 'lesson',
-                id=generate_lesson_name(dataset_family, dataset, variant, model, questions, temperature, max_items, i),
-            )
-            material = SubElement(lesson, 'material')
             if variant == "cot":
-                material.text = f"{context}\n\nPlease answer the following question. Reason step by step.\n"
+                material = f"{context}\n\nPlease answer the following question. Reason step by step.\n"
             elif variant == "default":
-                material.text = f"{context}"
-            ex_element = SubElement(lesson, 'exercise')
-            ex_element.text = exercise
-    try:
-        return prettify(lessons)
-    except Exception:
-        print(f"Failure to prettify output for {input_path}")
-        return tostring(lessons, 'unicode')
+                material = context
+            else:
+                raise ValueError(f"Unknown variant: {variant}")
+            lessons.append({
+                "id": generate_lesson_name(dataset_family, dataset, variant, model, questions, temperature, max_items, i),
+                "material": material,
+                "exercises": [{"exercise": exercise}],
+            })
+    return {"lessons": lessons}
 
 
 def main(
@@ -72,7 +61,7 @@ def main(
     max_items: int = 1000,
     variant: str = "default"
 ) -> None:
-    """Convert CSV to pretty-printed XML lessons for curriculum generation."""
+    """Convert CSV to JSON lessons for curriculum generation."""
     if variant not in ["default", "cot"]:
         raise ValueError(f"Unknown variant: {variant}")
 
@@ -85,10 +74,10 @@ def main(
         return
 
     print(f"Processing {input_path}")
-    xml_output = create_xml(dataset_family, dataset, input_path, model, train_questions, temperature, max_items, variant)
+    data = create_lessons(dataset_family, dataset, input_path, model, train_questions, temperature, max_items, variant)
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(xml_output)
-    print(f"XML written to {output_path}")
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"JSON written to {output_path}")
 
 if __name__ == "__main__":
     from jsonargparse import CLI

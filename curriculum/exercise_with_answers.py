@@ -1,23 +1,9 @@
 import json
 from dataclasses import dataclass
 import os
-
-import xml.etree.ElementTree as ET
-from xml.sax.saxutils import escape
 from typing import Optional, List
 
-from data.paths import TIPS_START, TIPS_END
-from models.messages import Message
-
-
-def _get_messages(xml_element: ET.Element) -> List[Message]:
-    """Parse and return Message objects from a <messages> element."""
-    messages_element = xml_element.find('messages')
-    assert messages_element is not None, "messages element not found"
-    return [
-        Message.from_xml_element(message)
-        for message in messages_element.findall('message')
-    ]
+from models.messages import Message, Role
 
 
 @dataclass
@@ -26,30 +12,15 @@ class Choice:
     content: str
     truncated: bool = False
 
+    def to_dict(self) -> dict:
+        d = {"content": self.content}
+        if self.truncated:
+            d["truncated"] = True
+        return d
 
-def _get_answer_choices(xml_element: ET.Element) -> List[Choice]:
-    """Parse and return Choice objects from <answer_choices> element."""
-    answer_choices_element = xml_element.find('answer_choices')
-    return [
-        Choice(choice.text.strip() if choice.text else ' ', truncated=choice.get('truncated') == "true")
-        for choice in answer_choices_element.findall('choice')
-    ]
-
-
-def _get_model_answer(xml_element: ET.Element) -> Optional['ModelAnswer']:
-    """Parse and return a ModelAnswer object from <model_answer> element, if present."""
-    model_answer_element = xml_element.find('model_answer')
-    if model_answer_element is None:
-        return None
-    return ModelAnswer(model_answer_element.text.strip())
-
-
-def _get_grading_str(xml_element: ET.Element) -> Optional['GradingStr']:
-    """Parse and return a GradingStr object from <grading_str> element, if present."""
-    grading_str_element = xml_element.find('grading_str')
-    if grading_str_element is None:
-        return None
-    return GradingStr(grading_str_element.text.strip())
+    @classmethod
+    def from_dict(cls, d: dict) -> "Choice":
+        return cls(content=d["content"], truncated=d.get("truncated", False))
 
 
 @dataclass
@@ -81,62 +52,39 @@ class ExerciseWithAnswers:
         self.grading_str = grading_str.content if isinstance(grading_str, GradingStr) else grading_str
 
     @classmethod
-    def from_xml(cls, xml_element: ET.Element, lesson_id: str) -> 'ExerciseWithAnswers':
-        """Parse ExerciseWithAnswers from XML."""
-        messages = _get_messages(xml_element)
-        answer_choices = _get_answer_choices(xml_element)
-        model_answer = _get_model_answer(xml_element)
-        grading_str = _get_grading_str(xml_element)
+    def from_dict(cls, d: dict, lesson_id: str) -> 'ExerciseWithAnswers':
+        """Parse ExerciseWithAnswers from a dict."""
+        messages = [Message.from_dict(m) for m in d["messages"]]
+        answer_choices = [Choice.from_dict(c) for c in d.get("answer_choices", [])]
+        model_answer = ModelAnswer(d["model_answer"]) if d.get("model_answer") else None
+        grading_str = GradingStr(d["grading_str"]) if d.get("grading_str") else None
         return cls(messages, answer_choices, lesson_id, model_answer, grading_str)
 
-    def to_xml(self, parent: ET.Element) -> ET.Element:
-        """Serialize ExerciseWithAnswers to XML under the given parent element."""
-        element = ET.SubElement(parent, "exercise_with_answers")
-        messages_element = ET.SubElement(element, "messages")
-        for msg in self.messages:
-            msg_element = ET.SubElement(messages_element, "message")
-            msg_element.set("role", msg.role.value)
-            msg_element.text = msg.content
-        choices_element = ET.SubElement(element, "answer_choices")
-        for choice in self.answer_choices:
-            choice_element = ET.SubElement(choices_element, "choice")
-            choice_element.text = choice.content
-            if choice.truncated:
-                choice_element.set("truncated", "true")
-        if self.model_answer and len(self.model_answer):
-            model_answer_element = ET.SubElement(element, "model_answer")
-            model_answer_element.text = self.model_answer
-        if self.grading_str and len(self.grading_str):
-            grading_str_element = ET.SubElement(element, "grading_str")
-            grading_str_element.text = self.grading_str
-        return element
+    def to_dict(self) -> dict:
+        """Serialize ExerciseWithAnswers to a dict."""
+        d = {
+            "messages": [m.to_dict() for m in self.messages],
+            "answer_choices": [c.to_dict() for c in self.answer_choices],
+        }
+        if self.model_answer:
+            d["model_answer"] = self.model_answer
+        if self.grading_str:
+            d["grading_str"] = self.grading_str
+        return d
 
     def __str__(self):
-        messages = self.messages
-        answer_choices = self.answer_choices
-        return f"ExerciseWithAnswers: {messages=}, {answer_choices=}"
+        return f"ExerciseWithAnswers: messages={self.messages}, answer_choices={self.answer_choices}"
 
     def __repr__(self):
         return str(self)
 
 
-def xml_dump(element: ET.Element, file) -> None:
-    """Write XML for an element to a file, with tag-per-line formatting."""
-    xml_content = ET.tostring(element, encoding='unicode')
-    xml_content = xml_content.replace("<", "\n<").replace(">", ">\n")
-    xml_content = xml_content.replace(escape(TIPS_START), TIPS_START)
-    xml_content = xml_content.replace(escape(TIPS_END), TIPS_END)
-    file.write(xml_content)
-
-
-def save_to_xml(
+def save_to_json(
     filepath: os.PathLike,
     exercises_with_answers: List[ExerciseWithAnswers]
 ) -> None:
-    """Save a list of ExerciseWithAnswers objects as an XML file."""
-    root = ET.Element("exercises_with_answers")
-    for ex in exercises_with_answers:
-        ex.to_xml(root)
-    with open(filepath, "w") as file:
-        xml_dump(root, file)
+    """Save a list of ExerciseWithAnswers objects as a JSON file."""
+    data = {"exercises_with_answers": [ex.to_dict() for ex in exercises_with_answers]}
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"Saved to {filepath}")

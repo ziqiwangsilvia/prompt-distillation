@@ -14,11 +14,11 @@ gpu:
   vllm_host: localhost
 
 questions:
-  tool_batches: 40
-  nlp_batches: 60
+  tool_batches: 10
+  nlp_batches: 10
   eval_ratio: 0.2
-  max_train_items: 4000
-  max_eval_items: 600
+  max_train_items: 200
+  max_eval_items: 20
   topics:
     - "Spending breakdowns by category or payee"
     - "Income analysis and sources"
@@ -38,7 +38,7 @@ teacher_answers:
   tools_schema_path: context/financial_tools_schema_20260401.json
 
 training:
-  run_name: pd_fin_llm_tool_passing_guard
+  run_name: test_json
   learning_rate: 1e-5
   batch_size: 4
   micro_batch_size: 2

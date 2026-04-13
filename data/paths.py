@@ -5,6 +5,4 @@ DATA_PATH = BASE_PATH / "output" / "teacher_answers"
 ADAPTER_PATH = BASE_PATH / "adapters"
 MODEL_PATH = BASE_PATH / "checkpoints"
 
-TIPS_START = "<TIPS>"
-TIPS_END = "</TIPS>"
 DELIMITER = "---"

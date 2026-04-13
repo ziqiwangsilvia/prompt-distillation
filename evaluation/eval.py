@@ -11,10 +11,10 @@ import json
 import re
 from pathlib import Path
 
-from data.paths import BASE_PATH, TIPS_START, TIPS_END
+from data.paths import BASE_PATH
 from models.llm import LLM
 from models.messages import Message, Role
-from training.utils import read_exercises
+from training.utils import read_exercises, extract_question
 
 
 def run_inference(
@@ -72,11 +72,7 @@ def run_inference(
         refs = []
         prompts = []
         for ex in exercises:
-            content = ex.messages[-1].content
-            student_content = re.sub(
-                f'{re.escape(TIPS_START)}.*?{re.escape(TIPS_END)}',
-                '', content, flags=re.DOTALL
-            ).strip()
+            student_content = extract_question(ex)
             questions.append(student_content)
             refs.append(ex.answer_choices[0].content if ex.answer_choices else None)
             msgs = [Message(Role.USER, student_content)]
