@@ -55,7 +55,7 @@ python3 curriculum/generate_teacher_answers.py --generate_lesson True
 python3 curriculum/generate_teacher_answers.py --generate_exam True --max_items 20
 
 # Run training
-python3 training/run_train_student.py --run_name example --use_wandb True
+python3 training/train.py --run_name example --use_wandb True
 
 # Run final evaluation
 python3 evaluation/evaluate.py --adapter_id example
@@ -75,7 +75,7 @@ To reproduce SFT experiments on NYT with Llama-3-8B-Instruct, generate answers t
 python3 curriculum/generate_teacher_answers.py --generate_lesson True --lesson_temp 0.25
 
 # Run training
-python3 training/run_train_student.py --run_name example_sft --use_wandb True --logit_loss_weight 0.0 --token_loss_weight 1.0 --lesson_temp 0.25
+python3 training/train.py --run_name example_sft --use_wandb True --logit_loss_weight 0.0 --token_loss_weight 1.0 --lesson_temp 0.25
 ```
 
 Example, to get the PD results for Qwen2.5-14B-Instruct on Amazon, we re-generate the questions and answers with qwen, and run the training using DeepSpeed
@@ -93,7 +93,7 @@ python3 curriculum/csv_to_lesson.py --dataset amazon --model qwen2.5-14b-instruc
 python3 curriculum/generate_teacher_answers.py --generate_lesson True --base qwen2.5-14b-instruct --dataset amazon --question_model qwen2.5-14b-instruct
 
 # Run training
-accelerate launch training/run_train_student.py --deepspeed_path config/ds2.json --run_name example_qwen_amazon --use_wandb True --base qwen2.5-14b-instruct --dataset amazon --question_model qwen2.5-14b-instruct --lesson_model qwen2.5-14b-instruct --n_epochs 1 --warmup_steps 100
+accelerate launch training/train.py --deepspeed_path config/ds2.json --run_name example_qwen_amazon --use_wandb True --base qwen2.5-14b-instruct --dataset amazon --question_model qwen2.5-14b-instruct --lesson_model qwen2.5-14b-instruct --n_epochs 1 --warmup_steps 100
 
 # Run final evaluation
 python3 evaluation/evaluate.py --adapter_id example_qwen_amazon --dataset amazon

@@ -229,7 +229,7 @@ else
     if [ -n "${DEEPSPEED_PATH}" ]; then
         TRAIN_ARGS+=(--deepspeed_path "${DEEPSPEED_PATH}")
     fi
-    CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/run_train_student.py "${TRAIN_ARGS[@]}"
+    CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/train.py "${TRAIN_ARGS[@]}"
 fi
 
 echo "=== Pipeline complete ==="

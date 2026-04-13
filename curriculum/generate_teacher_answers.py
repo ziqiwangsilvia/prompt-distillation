@@ -15,7 +15,7 @@ from data.naming import generate_augmented_filename, generate_lesson_filename, g
 from models.llm import LLM, get_model_family
 from models.messages import Message, Role, merge_messages
 from models.configs import create_model_flags, MODEL_CONFIGS, get_model_config
-from models.tool_call_format import convert_tool_call_format
+from data.tool_call_format import convert_tool_call_format
 from models.utils import generate_sampling_params
 from curriculum.lesson import read_lessons, Lesson, Exercise
 from curriculum.exercise_with_answers import ExerciseWithAnswers, Choice

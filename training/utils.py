@@ -13,11 +13,10 @@ from torch.utils.data import Sampler
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 
 from models.llm import LLM
-from models.messages import Message
+from models.messages import Message, Role
 from models.configs import MODEL_CONFIGS
 from data.paths import DELIMITER
 from curriculum.exercise_with_answers import ExerciseWithAnswers
-from training.metrics import Aggregator
 
 
 def warn(msg: str) -> None:
@@ -85,12 +84,21 @@ def generate_answers(
 
 
 def tokenize_teacher_student(material: str, question: str, llm: LLM) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Tokenize teacher (material+question) and student (question only) prompts."""
-    teacher_prompt = material + question
+    """Tokenize teacher and student prompts using chat template.
+    Teacher: material as system message + question as user message.
+    Student: default system message (from llm.opening_message) + question as user message.
+    """
+    # Teacher: use material as system message (bypass default opening_message)
+    saved_opening = llm.opening_message
+    llm.opening_message = Message(Role.SYSTEM, material) if material else None
+    teacher_prompt = llm.messages_to_prompt([Message(Role.USER, question)])
     teacher_tokens = llm.tokenize(teacher_prompt)
-    teacher_tokens = llm.add_bos(teacher_tokens)
-    student_tokens = llm.tokenize(question)
-    student_tokens = llm.add_bos(student_tokens)
+    llm.opening_message = saved_opening
+
+    # Student: default system message + question
+    student_prompt = llm.messages_to_prompt([Message(Role.USER, question)])
+    student_tokens = llm.tokenize(student_prompt)
+
     return student_tokens, teacher_tokens
 
 

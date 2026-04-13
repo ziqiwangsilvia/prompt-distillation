@@ -12,7 +12,7 @@ from models.llm import LLM
 from models.messages import Message, Role
 from models.configs import MODEL_CONFIGS, create_model_flags
 from models.utils import set_seed
-from training.train_student import train
+from training.trainer import Trainer
 
 def main(
     # This is the student model being trained 
@@ -76,8 +76,6 @@ def main(
     reverse_kl: bool = False,
     partition_idx: Optional[int] = None,
     partition_type: Optional[str] = None,
-    tulu: bool = False,
-    tulu_batch_size: int = 2,
 ):
     if seed:
         set_seed(seed)
@@ -165,12 +163,12 @@ def main(
     if distractor_dataset and "llama3" not in base:
         raise NotImplementedError("Distractors only tested for LLama3 models. If you want to use distractors for Qwen, comment out this line and make sure that the outputs are reasonable.")
 
-    train(
-        project_path=project_path,
+    trainer = Trainer(
         base_llm=base_llm,
         data=data,
         hp=hparams,
     )
+    trainer.train()
 
 if __name__ == "__main__":
     from jsonargparse import CLI
