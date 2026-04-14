@@ -37,10 +37,12 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
         datapath: Path = DATA_PATH,
         max_length: int = 0,
         debug: bool = False,
+        teacher_llm=None,
     ):
         assert isinstance(filenames, list), "filenames should be a list"
         self.samples: List[Dict[str, Any]] = []
         self.lesson_names: List[str] = []
+        t_llm = teacher_llm or llm
         if verbose:
             print("==== StudentTeacherDataset ====", flush=True)
 
@@ -55,18 +57,22 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
             for ex_i, exercise in enumerate(exercises):
                 question = extract_question(exercise)
                 material, _ = extract_material_and_question(exercise)
-                student_prompt_tokens, teacher_prompt_tokens = tokenize_teacher_student(material, question, llm)
+                student_closed_tokens, student_open_tokens, teacher_tokens = tokenize_teacher_student(material, question, llm, teacher_llm=teacher_llm)
 
                 if verbose and ex_i == 0:
-                    print(f"  [Example] Teacher sees: {llm.decode(teacher_prompt_tokens)[:200]}...")
-                    print(f"  [Example] Student sees: {llm.decode(student_prompt_tokens)[:200]}...")
+                    print(f"  [Example] Teacher sees: {t_llm.decode(teacher_tokens)[:200]}...")
+                    print(f"  [Example] Student (open) sees: {llm.decode(student_open_tokens)[:200]}...")
+                    print(f"  [Example] Student (closed) sees: {llm.decode(student_closed_tokens)[:200]}...")
 
                 for choice in exercise.answer_choices:
                     answer_tokens = prepare_answer_tokens(llm, choice.content, max_length, choice.truncated)
+                    teacher_answer_tokens = prepare_answer_tokens(t_llm, choice.content, max_length, choice.truncated) if teacher_llm else answer_tokens
                     sample = {
-                        "student_prompt_tokens": student_prompt_tokens,
-                        "teacher_prompt_tokens": teacher_prompt_tokens,
+                        "student_prompt_tokens": student_closed_tokens,
+                        "student_open_prompt_tokens": student_open_tokens,
+                        "teacher_prompt_tokens": teacher_tokens,
                         "answer_tokens": answer_tokens,
+                        "teacher_answer_tokens": teacher_answer_tokens,
                         "teacher_answer": choice.content,
                         "lesson_ix": lesson_ix,
                         "question": question,
@@ -87,29 +93,45 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
     @staticmethod
     def collate_fn(samples, padding_value, llm):
         """Collate batch for student-teacher training."""
-        student_seqs, student_labels, teacher_seqs, teacher_masks = [], [], [], []
+        student_open_seqs, student_open_labels = [], []
+        student_closed_seqs, student_closed_labels = [], []
+        teacher_seqs, teacher_masks = [], []
         for sample in samples:
-            student_prompt_tokens = sample["student_prompt_tokens"]
-            seq = torch.cat([student_prompt_tokens, sample["answer_tokens"]], dim=1)
+            answer = sample["answer_tokens"]
 
+            # Student open-book (with material)
+            open_prompt = sample["student_open_prompt_tokens"]
+            seq = torch.cat([open_prompt, answer], dim=1)
             labels = seq.clone()
-            student_prompt_len = student_prompt_tokens.size(1)
-            labels[0, :student_prompt_len] = IGNORE_INDEX
-            student_seqs.append(seq[0])
-            student_labels.append(labels[0])
+            labels[0, :open_prompt.size(1)] = IGNORE_INDEX
+            student_open_seqs.append(seq[0])
+            student_open_labels.append(labels[0])
 
-            seq = torch.cat([sample["teacher_prompt_tokens"], sample["answer_tokens"]], dim=1)
+            # Student closed-book (no material)
+            closed_prompt = sample["student_prompt_tokens"]
+            seq = torch.cat([closed_prompt, answer], dim=1)
+            labels = seq.clone()
+            labels[0, :closed_prompt.size(1)] = IGNORE_INDEX
+            student_closed_seqs.append(seq[0])
+            student_closed_labels.append(labels[0])
+
+            # Teacher open-book (with material, teacher tokenizer)
+            teacher_prompt = sample["teacher_prompt_tokens"]
+            teacher_answer = sample["teacher_answer_tokens"]
+            seq = torch.cat([teacher_prompt, teacher_answer], dim=1)
             teacher_mask = torch.ones_like(seq[0], dtype=torch.bool)
-            teacher_prompt_len = sample["teacher_prompt_tokens"].size(1)
-            teacher_mask[:teacher_prompt_len] = 0
+            teacher_mask[:teacher_prompt.size(1)] = 0
             teacher_seqs.append(seq[0])
             teacher_masks.append(teacher_mask)
 
         return {
-            'student_seqs': pad_sequence(student_seqs, batch_first=True, padding_value=padding_value),
-            'student_labels': pad_sequence(student_labels, batch_first=True, padding_value=IGNORE_INDEX).long(),
+            'student_open_seqs': pad_sequence(student_open_seqs, batch_first=True, padding_value=padding_value),
+            'student_open_labels': pad_sequence(student_open_labels, batch_first=True, padding_value=IGNORE_INDEX).long(),
+            'student_closed_seqs': pad_sequence(student_closed_seqs, batch_first=True, padding_value=padding_value),
+            'student_closed_labels': pad_sequence(student_closed_labels, batch_first=True, padding_value=IGNORE_INDEX).long(),
             'teacher_seqs': pad_sequence(teacher_seqs, batch_first=True, padding_value=padding_value),
             'teacher_masks': pad_sequence(teacher_masks, batch_first=True, padding_value=0).bool(),
+            'teacher_answers': [sample["teacher_answer"] for sample in samples],
             'lesson_ixs': torch.tensor([sample["lesson_ix"] for sample in samples]),
         }
 
@@ -150,15 +172,15 @@ class TeacherDataset(torch.utils.data.Dataset):
                 answer_choice = exercise.answer_choices[0]
                 answer_tokens = prepare_answer_tokens(llm, answer_choice.content, max_length, answer_choice.truncated)
                 material, question = extract_material_and_question(exercise)
-                student_prompt_tokens, teacher_prompt_tokens = tokenize_teacher_student(material, question, llm)
+                student_closed_tokens, student_open_tokens, _ = tokenize_teacher_student(material, question, llm)
 
                 if verbose and ex_i == 0:
-                    print(f"  [Example] Teacher sees: {llm.decode(teacher_prompt_tokens)[:200]}...")
-                    print(f"  [Example] Student sees: {llm.decode(student_prompt_tokens)[:200]}...")
+                    print(f"  [Example] Open-book sees: {llm.decode(student_open_tokens)[:200]}...")
+                    print(f"  [Example] Closed-book sees: {llm.decode(student_closed_tokens)[:200]}...")
 
                 sample = {
-                    "prompt_tokens": teacher_prompt_tokens,
-                    "student_prompt_tokens": student_prompt_tokens,
+                    "prompt_tokens": student_open_tokens,
+                    "student_prompt_tokens": student_closed_tokens,
                     "answer_tokens": answer_tokens,
                     "lesson_ix": lesson_ix,
                 }

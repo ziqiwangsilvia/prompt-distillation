@@ -21,6 +21,7 @@ from models.llm import LLM
 from models.utils import DualOutput, num_parameters
 from evaluation.metrics import Aggregator
 from data.dataloader import build_dataloaders
+from training.projection import VocabProjection
 from training.loss import compute_token_loss, compute_logit_loss
 from training.utils import (
     generate_answers,
@@ -31,15 +32,16 @@ from training.utils import (
 
 
 class Trainer:
-    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace):
+    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None):
         self.base_llm = base_llm
+        self.teacher_tokenizer = teacher_llm.tokenizer if teacher_llm else None
         self.hp = hp
         self.accelerator = self._init_run()
 
         # Data
         self.logit_train_ds, self.token_train_ds, \
             self.logit_loader, self.token_loader, \
-            self.logit_val_loader, self.token_val_loader = build_dataloaders(base_llm, data, hp)
+            self.logit_val_loader, self.token_val_loader = build_dataloaders(base_llm, data, hp, teacher_llm=teacher_llm)
 
         token_count = len(self.token_train_ds) if self.token_train_ds else 0
         logit_count = len(self.logit_train_ds) if self.logit_train_ds else 0
@@ -53,7 +55,7 @@ class Trainer:
             self.logit_loader = cycle(self.logit_loader)
 
         # Models
-        self.student, self.teacher, self.optimizer = self._init_models()
+        self.student, self.teacher, self.optimizer, self.projection = self._init_models()
 
         # Steps
         if hp.logit_loss_weight:
@@ -116,7 +118,7 @@ class Trainer:
         hp.checkpoint = bool(hp.checkpoint_interval or hp.checkpoint_interval_seconds)
         return accelerator
 
-    def _init_models(self) -> Tuple[PreTrainedModel, Union[str, PreTrainedModel], torch.optim.Optimizer]:
+    def _init_models(self):
         hp = self.hp
         base_llm = self.base_llm
         accelerator = self.accelerator
@@ -140,19 +142,42 @@ class Trainer:
         student, optimizer = accelerator.prepare(student, optimizer)
 
         teacher = None
+        projection = None
         if hp.logit_loss_weight:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
                 teacher_llm = LLM(hp.teacher, opening_message=hp.opening_message)
-                accelerator.state.select_deepspeed_plugin("teacher")
-                teacher = teacher_llm.load_model(training=False, deepspeed=True)
-                teacher = accelerator.prepare(teacher)
+                if hp.deepspeed_path:
+                    accelerator.state.select_deepspeed_plugin("teacher")
+                    teacher = teacher_llm.load_model(training=False, deepspeed=True)
+                    teacher = accelerator.prepare(teacher)
+                else:
+                    teacher = teacher_llm.load_model(training=False, deepspeed=False)
+                    # Place teacher on a separate GPU if available
+                    n_gpus = torch.cuda.device_count()
+                    teacher_device = torch.device(f"cuda:{n_gpus - 1}") if n_gpus > 1 else accelerator.device
+                    if hp.mixed_precision == "bf16":
+                        teacher = teacher.to(dtype=torch.bfloat16)
+                    teacher = teacher.to(teacher_device)
+                    self.log(f"Teacher on {teacher_device}")
                 teacher.eval()
+
+                # Projection for cross-family distillation (different vocab sizes)
+                teacher_vocab = teacher.config.vocab_size
+                student_vocab = student.config.vocab_size
+                if teacher_vocab != student_vocab:
+                    self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")
+                    projection = VocabProjection(teacher_vocab, student_vocab)
+                    if hp.mixed_precision == "bf16":
+                        projection = projection.to(torch.bfloat16)
+                    projection = accelerator.prepare(projection)
+                    accelerator.register_for_checkpointing(projection)
+                    optimizer.add_param_group({"params": projection.parameters()})
 
         self.log("Student bf16:", _model_is_bf16(student))
 
-        return student, teacher, optimizer
+        return student, teacher, optimizer, projection
 
     # ── Training ───────────────────────────────────────────
 
@@ -194,7 +219,7 @@ class Trainer:
 
             # Generate
             if hp.generate and step % hp.generation_interval == 0:
-                if hp.logit_loss_weight and self.logit_train_ds:
+                if (hp.logit_loss_weight) and self.logit_train_ds:
                     ix = torch.randint(high=len(self.logit_train_ds), size=(1,)).item()
                     generation_samples = [self.logit_train_ds[ix]]
                 elif self.token_train_ds:
@@ -264,10 +289,16 @@ class Trainer:
     # ── Loss ───────────────────────────────────────────────
 
     def _compute_token_loss(self, batch, reduction="batch"):
-        return compute_token_loss(batch, self.student, closed_book=self.hp.closed_book_token_loss, reduction=reduction)
+        return compute_token_loss(batch, self.student, closed_book=self.hp.closed_book, reduction=reduction)
 
     def _compute_logit_loss(self, batch):
-        return compute_logit_loss(batch, self.student, self.teacher, temperature=self.hp.train_temperature, reverse_kl=self.hp.reverse_kl)
+        return compute_logit_loss(
+            batch, self.student, self.teacher,
+            temperature=self.hp.train_temperature, reverse_kl=self.hp.reverse_kl,
+            closed_book=self.hp.closed_book, projection=self.projection,
+            student_tokenizer=self.base_llm.tokenizer,
+            teacher_tokenizer=self.teacher_tokenizer,
+        )
 
     # ── Validation ─────────────────────────────────────────
 

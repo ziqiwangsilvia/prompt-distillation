@@ -83,23 +83,31 @@ def generate_answers(
     return answers
 
 
-def tokenize_teacher_student(material: str, question: str, llm: LLM) -> Tuple[torch.Tensor, torch.Tensor]:
+def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm: LLM = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Tokenize teacher and student prompts using chat template.
-    Teacher: material as system message + question as user message.
-    Student: default system message (from llm.opening_message) + question as user message.
+    Teacher: material as system message + question (uses teacher_llm tokenizer if provided).
+    Student open-book: material as system message + question (student tokenizer).
+    Student closed-book: default system message + question (student tokenizer).
+    Returns (student_closed_tokens, student_open_tokens, teacher_tokens).
     """
-    # Teacher: use material as system message (bypass default opening_message)
-    saved_opening = llm.opening_message
+    t_llm = teacher_llm or llm
+
+    # Teacher: use material as system message
+    saved = t_llm.opening_message
+    t_llm.opening_message = Message(Role.SYSTEM, material) if material else None
+    teacher_tokens = t_llm.tokenize(t_llm.messages_to_prompt([Message(Role.USER, question)]))
+    t_llm.opening_message = saved
+
+    # Student open-book: material as system message (student tokenizer)
+    saved = llm.opening_message
     llm.opening_message = Message(Role.SYSTEM, material) if material else None
-    teacher_prompt = llm.messages_to_prompt([Message(Role.USER, question)])
-    teacher_tokens = llm.tokenize(teacher_prompt)
-    llm.opening_message = saved_opening
+    student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)]))
+    llm.opening_message = saved
 
-    # Student: default system message + question
-    student_prompt = llm.messages_to_prompt([Message(Role.USER, question)])
-    student_tokens = llm.tokenize(student_prompt)
+    # Student closed-book: default system message
+    student_closed_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)]))
 
-    return student_tokens, teacher_tokens
+    return student_closed_tokens, student_open_tokens, teacher_tokens
 
 
 def extract_question(exercise: ExerciseWithAnswers) -> str:

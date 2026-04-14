@@ -1,12 +1,16 @@
 # Pipeline configuration
 
 models:
-  teacher: qwen2.5-7b-instruct
+  teacher: qwen2.5-72b-instruct
   student: llama3-8b-instruct
 
 dataset:
   family: financial
   name: tool_calling
+  variant: default
+  distractor_dataset: ""
+  partition_idx: null
+  partition_type: null
 
 gpu:
   vllm: 0
@@ -19,6 +23,9 @@ questions:
   eval_ratio: 0.2
   max_train_items: 200
   max_eval_items: 20
+  question_temperature: 1.5
+  lesson_num_choices: 1
+  exam_num_choices: 1
   topics:
     - "Spending breakdowns by category or payee"
     - "Income analysis and sources"
@@ -39,18 +46,38 @@ teacher_answers:
 
 training:
   run_name: test_json
+  group_name: null
   learning_rate: 1e-5
   batch_size: 4
   micro_batch_size: 2
   n_epochs: 2
   lora_r: 256
+  mixed_precision: bf16
+  closed_book: true
   token_loss_weight: 1.0
-  logit_loss_weight: 0.0
+  logit_loss_weight: 0.5
+  train_temperature: 2.0
+  reverse_kl: false
   warmup_ratio: 0.1
+  warmup_steps: null
   weight_decay: 0.1
   max_grad_norm: 1.0
+  decay: true
+  seed: 0
+  eval_interval: -1
+  log_interval: 1
+  generation_interval: 0
+  validate: true
+  save: true
+  save_during_training: false
+  checkpoint_interval: 0
+  checkpoint_interval_seconds: 0
+  max_length: 0
+  max_total_length: 0
+  datapath: output/teacher_answers
   use_wandb: false
   deepspeed_path: ""
+  deepspeed_path_teacher: ""
 
 # Leave empty to auto-detect from teacher model family
 system_prompt_path: context/financial_system_prompt_notool_qwen.txt

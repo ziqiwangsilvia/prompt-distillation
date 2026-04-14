@@ -31,6 +31,15 @@ def main(args: AllArgs):
 
     base_llm = LLM(args.base, opening_message=args.opening_message)
 
+    # Create teacher LLM for tokenization if using a separate teacher model
+    teacher_llm = None
+    if (args.logit_loss_weight) and args.teacher not in {"student", "student_base"}:
+        from models.configs import MODEL_CONFIGS
+        from models.messages import Message, Role
+        teacher_config = MODEL_CONFIGS[args.teacher]
+        teacher_opening = Message(Role.SYSTEM, teacher_config.system_message)
+        teacher_llm = LLM(args.teacher, opening_message=teacher_opening)
+
     # Build data file list
     lesson_model_flags = create_model_flags(args.lesson_model)
     exam_model_flags = create_model_flags(args.exam_model)
@@ -58,7 +67,7 @@ def main(args: AllArgs):
 
     data = [[train_file], [val_file] if args.validate else []]
 
-    trainer = Trainer(base_llm=base_llm, data=data, hp=args)
+    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm)
     trainer.train()
 
 

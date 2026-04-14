@@ -14,9 +14,8 @@ from models.messages import Message, Role
 class StudentArgs:
     base: str = "llama3-8b-instruct"
     lora_r: int = 1024
-    lora_type: str = "full"
     mixed_precision: str = "bf16"
-    closed_book_token_loss: bool = True
+    closed_book: bool = True
     # Computed in __post_init__
     peft_config: LoraConfig = field(init=False, default=None)
     opening_message: Message = field(init=False, default=None)
@@ -38,7 +37,6 @@ class StudentArgs:
 class TeacherArgs:
     teacher: str = "qwen2.5-7b-instruct"
     train_temperature: float = 2.0
-    kl_div_loss: bool = True
     token_loss_weight: float = 0.0
     logit_loss_weight: float = 1.0
     reverse_kl: bool = False
@@ -70,7 +68,6 @@ class DataArgs:
 
 @dataclass
 class TrainingArgs:
-    project_name: str = "huggingface"
     group_name: str = None
     run_name: str = None
     learning_rate: float = 1e-5
@@ -84,7 +81,6 @@ class TrainingArgs:
     decay: bool = True
     seed: int = 0
     eval_interval: int = -1
-    save_interval: float = float("inf")
     log_interval: int = 1
     generation_interval: int = 0  # -1 every epoch, 0 never
     validate: bool = True
