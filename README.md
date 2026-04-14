@@ -1,23 +1,27 @@
 # Codebase for Prompt Distillation
 
 ## Overview
-This repository contains the code necessary to reproduce the main results of our Prompt Distillation submission.
+This repository contains the code necessary to reproduce the main results of our Prompt Distillation submission. It supports same-tokenizer and cross-tokenizer distillation (e.g., Qwen → Llama) with character-span aligned KL divergence.
 
 ## Repository Structure
 
 ```
 ├── models/            # LLM class, model configs, messages, tool call format
-├── data/              # File naming and dataset loading utilities
+├── data/              # Dataset classes, dataloaders, file naming utilities
 ├── curriculum/        # Lesson/exercise data structures and curriculum generation scripts
-├── training/          # Code for performing training runs 
-├── evaluation/        # Miscellaneous scripts for evaluation 
-├── config/            # DeepSpeed Configs 
-├── datasets/          # Evaluation datasets 
-├── paths.py           # Path constants and markup tags (TIPS, DELIMITER)
-├── utils.py           # General utilities (seeding, GPU, sampling params, etc.)
-├── requirements.txt   # Dependencies
-├── README.md          # This file
-└── setup.py           # Setup file 
+├── training/          # Training loop, loss functions, projection, alignment
+│   ├── train.py       # Entry point for training
+│   ├── trainer.py     # Trainer class with multi-GPU teacher support
+│   ├── loss.py        # Token loss, logit loss (flat + aligned KL)
+│   ├── projection.py  # VocabProjection + character-span alignment
+│   ├── params.py      # All training hyperparameters
+│   └── utils.py       # Tokenization, generation, data loading helpers
+├── evaluation/        # Evaluation and grading scripts
+├── config/            # Pipeline YAML config and DeepSpeed configs
+├── scripts/           # Pipeline runner and evaluation scripts
+├── datasets/          # Evaluation datasets
+├── context/           # System prompts and tool schemas
+└── .env               # Environment variables (HF_HOME, HF_TOKEN)
 ```
 
 ## Installation
@@ -28,83 +32,109 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dependencies
 uv sync
+
+# Set up environment
+cp .env.example .env  # Edit with your HF_HOME and HF_TOKEN
 ```
 
-## Usage
-Basic instructions for reproducing the main Prompt Distillation result on NYT with Llama-3-8B-Instruct.
+## Pipeline
+
+The main entry point is `scripts/run_pipeline.sh`, configured via `config/pipeline.yaml`.
+
+```bash
+# Full pipeline: data generation + training
+bash scripts/run_pipeline.sh
+
+# Full pipeline with custom config
+bash scripts/run_pipeline.sh config/my_config.yaml
+
+# Training only (set train_only: true in pipeline.yaml)
+bash scripts/run_pipeline.sh
+```
+
+### Pipeline Steps
+
+1. **Generate questions** — uses vLLM server with the teacher model
+2. **Convert to lesson format** — structures questions for training
+3. **Generate exam** — creates evaluation set
+4. **Generate teacher answers (train)** — teacher answers training questions
+5. **Generate teacher answers (eval)** — teacher answers eval questions
+6. **Train** — kills vLLM, loads teacher + student on GPUs, runs training
+
+### Configuration (`config/pipeline.yaml`)
+
+```yaml
+project:
+  run_name: my_run          # Experiment name
+  train_only: false          # Skip data generation, go straight to training
+  use_wandb: false
+  system_prompt_path: ...    # System prompt for the teacher
+  tools_schema_path: ...     # Tool schema for tool-calling tasks
+
+models:
+  teacher: qwen2.5-72b-instruct
+  student: llama3-8b-instruct
+
+dataset:
+  datapath: output/teacher_answers   # Where generated data is saved/read
+  custom_train_data: ""              # Absolute path to override auto-generated train data
+  custom_val_data: ""                # Absolute path to override auto-generated val data
+
+gpu:
+  vllm: "0,1"              # GPUs for vLLM (auto tensor-parallel)
+  train: "0,1"             # GPUs for training
+
+training:
+  token_loss_weight: 1.0    # Cross-entropy on answer tokens
+  logit_loss_weight: 0.5    # KL divergence from teacher
+  closed_book: true         # Student sees question only (no material)
+  # ... see pipeline.yaml for all options
+```
+
+## Usage Examples
+
+### Same-tokenizer distillation (Llama → Llama)
 
 ```bash
 # Launch vLLM server
-python3 -u -m vllm.entrypoints.openai.api_server --model meta-llama/Meta-Llama-3-8B-Instruct --dtype auto --api-key token-abc123 --tensor-parallel-size <N_GPUS>
+python3 -u -m vllm.entrypoints.openai.api_server \
+    --model meta-llama/Meta-Llama-3-8B-Instruct --dtype auto --api-key token-abc123
 
-# Generate questions
-python3 evaluation/sample_questions.py --vllm_hostname <VLLM_HOST>
-
-# Convert generated questions into lesson format
-python3 curriculum/csv_to_lesson.py
-
-# Generate test set questions in lesson format
-python3 curriculum/questions_to_exam.py --max_items 20
-
-# Generate answers to training questions
-python3 curriculum/generate_teacher_answers.py --generate_lesson True
-
-# Generate answers to test set questions
-python3 curriculum/generate_teacher_answers.py --generate_exam True --max_items 20
-
-# Run training
-python3 training/train.py --run_name example --use_wandb True
-
-# Run final evaluation
-python3 evaluation/evaluate.py --adapter_id example
-
-# Run final evaluation with RAG
-python3 evaluation/evaluate.py --adapter_id example --output_filename output_rewritten_rag.csv --openai_rag True
-
-# Run grading
-python3 evaluation/grade_answers_llm.py --input_path "./outputs/squadshifts_nyt/**/output*" --vllm_hostname <VLLM_HOST>
-python3 evaluation/grade_answers_match.py --input_path "./outputs/squadshifts_nyt/**/output*"
+# Generate data, then train
+bash scripts/run_pipeline.sh
 ```
 
-To reproduce SFT experiments on NYT with Llama-3-8B-Instruct, generate answers to training questions at a lower temperature and run training using a different command:
+### Cross-tokenizer distillation (Qwen → Llama)
 
-```bash
-# Generate answers to training questions
-python3 curriculum/generate_teacher_answers.py --generate_lesson True --lesson_temp 0.25
-
-# Run training
-python3 training/train.py --run_name example_sft --use_wandb True --logit_loss_weight 0.0 --token_loss_weight 1.0 --lesson_temp 0.25
+Set in `pipeline.yaml`:
+```yaml
+models:
+  teacher: qwen2.5-72b-instruct
+  student: llama3-8b-instruct
 ```
 
-Example, to get the PD results for Qwen2.5-14B-Instruct on Amazon, we re-generate the questions and answers with qwen, and run the training using DeepSpeed
-```bash
-# Launch vLLM server
-python3 -u -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-14B-Instruct --dtype auto --api-key token-abc123 --tensor-parallel-size <N_GPUS>
+The pipeline automatically:
+- Detects vocab mismatch and creates a `VocabProjection` (bottleneck linear layer)
+- Uses character-span alignment for token-level KL
+- Splits the teacher across multiple GPUs via `dispatch_model`
 
-# Generate questions
-python3 evaluation/sample_questions.py --vllm_hostname <VLLM_HOST> --base qwen2.5-14b-instruct --dataset amazon
+### Training only with custom data
 
-# Convert generated questions into lesson format
-python3 curriculum/csv_to_lesson.py --dataset amazon --model qwen2.5-14b-instruct
-
-# Generate answers to training questions
-python3 curriculum/generate_teacher_answers.py --generate_lesson True --base qwen2.5-14b-instruct --dataset amazon --question_model qwen2.5-14b-instruct
-
-# Run training
-accelerate launch training/train.py --deepspeed_path config/ds2.json --run_name example_qwen_amazon --use_wandb True --base qwen2.5-14b-instruct --dataset amazon --question_model qwen2.5-14b-instruct --lesson_model qwen2.5-14b-instruct --n_epochs 1 --warmup_steps 100
-
-# Run final evaluation
-python3 evaluation/evaluate.py --adapter_id example_qwen_amazon --dataset amazon
+```yaml
+project:
+  train_only: true
+dataset:
+  custom_train_data: /path/to/train.json
+  custom_val_data: /path/to/val.json
 ```
 
-For all HotpotQA experiments, use
-```bash
---dataset_family hotpotqa --dataset distractor
+### SFT only (no distillation)
+
+```yaml
+training:
+  token_loss_weight: 1.0
+  logit_loss_weight: 0.0
 ```
-
-## Datasets
-
-We use the the four variants (Amazon, New Wiki, NYT, Reddit) of Squadshift from HuggingFace, and the distractor-dataset from HotpotQA. Our evaluation set (1000 questions / dataset) can be found in datasets/
 
 ## Cross-Tokenizer Distillation
 
@@ -125,13 +155,25 @@ The aligned teacher distribution at each student position is a weighted average 
 
 When vocab sizes differ, a learned bottleneck projection (`VocabProjection`) maps teacher logits to the student vocab space before alignment.
 
-## Other repositories
+## Multi-GPU Setup
 
-For MMLU-Pro evaluation, we used the following repo:
+- **Data generation**: vLLM uses tensor parallelism across all `gpu.vllm` GPUs
+- **Training**: vLLM is shut down, then:
+  - Student (with LoRA) is placed on one GPU via `accelerator.prepare()`
+  - Teacher (frozen) is split across all GPUs via `dispatch_model` with an explicit layer-based device map
+  - `VocabProjection` is trained alongside the student LoRA
+
+## Datasets
+
+We use the four variants (Amazon, New Wiki, NYT, Reddit) of SquadShifts from HuggingFace, and the distractor-dataset from HotpotQA. Our evaluation set (1000 questions / dataset) can be found in `datasets/`.
+
+## Other Repositories
+
+For MMLU-Pro evaluation, we used:
 https://github.com/TIGER-AI-Lab/MMLU-Pro
 
-For generation of training questions with Bonito, we used the official repo:
-https://github.com/BatsResearch/bonito with the following prompt
+For generation of training questions with Bonito, we used:
+https://github.com/BatsResearch/bonito with the following prompt:
 
 ```
 <|tasktype|>
