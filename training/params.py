@@ -61,6 +61,8 @@ class DataArgs:
     max_length: int = 0
     max_total_length: int = 0
     datapath: Path = field(default_factory=lambda: Path("output/teacher_answers"))
+    custom_train_data: str = ""
+    custom_val_data: str = ""
     distractor_dataset: str = ""
     partition_idx: Optional[int] = None
     partition_type: Optional[str] = None

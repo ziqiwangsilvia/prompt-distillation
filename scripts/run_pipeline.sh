@@ -8,6 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export PYTHONPATH="${PYTHONPATH:-}:${SCRIPT_DIR}"
 cd "${SCRIPT_DIR}"
 
+# Load environment variables
+if [ -f .env ]; then
+    set -a; source .env; set +a
+fi
+
 CONFIG="${1:-config/pipeline.yaml}"
 
 # Parse YAML config into shell variables
@@ -15,12 +20,21 @@ eval "$(python3 -c "
 import yaml, sys
 with open('${CONFIG}') as f:
     c = yaml.safe_load(f)
+p = c.get('project', {})
 m = c.get('models', {})
 d = c.get('dataset', {})
 g = c.get('gpu', {})
 q = c.get('questions', {})
 ta = c.get('teacher_answers', {})
 t = c.get('training', {})
+# Project
+print(f'RUN_NAME=\"{p.get(\"run_name\", \"pd_fin_llm\")}\"')
+_gn = p.get('group_name')
+print(f'GROUP_NAME=\"{_gn if _gn is not None else \"\"}\"')
+print(f'TRAIN_ONLY=\"{p.get(\"train_only\", False)}\"')
+print(f'USE_WANDB=\"{p.get(\"use_wandb\", False)}\"')
+print(f'SYSTEM_PROMPT_PATH=\"{p.get(\"system_prompt_path\", \"\")}\"')
+print(f'TOOLS_SCHEMA_PATH=\"{p.get(\"tools_schema_path\", \"\")}\"')
 # Models
 print(f'TEACHER_BASE=\"{m.get(\"teacher\", \"llama3-8b-instruct\")}\"')
 print(f'STUDENT_BASE=\"{m.get(\"student\", \"llama3-8b-instruct\")}\"')
@@ -29,13 +43,16 @@ print(f'DATASET_FAMILY=\"{d.get(\"family\", \"financial\")}\"')
 print(f'DATASET=\"{d.get(\"name\", \"tool_calling\")}\"')
 print(f'VARIANT=\"{d.get(\"variant\", \"default\")}\"')
 print(f'DISTRACTOR_DATASET=\"{d.get(\"distractor_dataset\", \"\")}\"')
+print(f'DATAPATH=\"{d.get(\"datapath\", \"output/teacher_answers\")}\"')
+print(f'CUSTOM_TRAIN_DATA=\"{d.get(\"custom_train_data\", \"\")}\"')
+print(f'CUSTOM_VAL_DATA=\"{d.get(\"custom_val_data\", \"\")}\"')
 _pi = d.get('partition_idx')
 print(f'PARTITION_IDX=\"{_pi if _pi is not None else \"\"}\"')
 _pt = d.get('partition_type')
 print(f'PARTITION_TYPE=\"{_pt if _pt is not None else \"\"}\"')
 # GPU
-print(f'VLLM_GPU=\"{g.get(\"vllm\", 0)}\"')
-print(f'TRAIN_GPU=\"{g.get(\"train\", 1)}\"')
+print(f'VLLM_GPU=\"{g.get(\"vllm\", \"0\")}\"')
+print(f'TRAIN_GPU=\"{g.get(\"train\", \"0\")}\"')
 print(f'VLLM_HOST=\"{g.get(\"vllm_host\", \"localhost\")}\"')
 # Questions
 print(f'TOOL_BATCHES=\"{q.get(\"tool_batches\", 10)}\"')
@@ -51,11 +68,7 @@ print(f'LESSON_TEMP=\"{ta.get(\"lesson_temp\", 0.25)}\"')
 print(f'EXAM_TEMP=\"{ta.get(\"exam_temp\", 0.25)}\"')
 print(f'MAX_TOTAL_TOKENS=\"{ta.get(\"max_total_tokens\", 4096)}\"')
 print(f'MAX_NEW_TOKENS=\"{ta.get(\"max_new_tokens\", 500)}\"')
-print(f'TOOLS_SCHEMA_PATH=\"{ta.get(\"tools_schema_path\", \"\")}\"')
 # Training
-print(f'RUN_NAME=\"{t.get(\"run_name\", \"pd_fin_llm\")}\"')
-_gn = t.get('group_name')
-print(f'GROUP_NAME=\"{_gn if _gn is not None else \"\"}\"')
 print(f'LEARNING_RATE=\"{t.get(\"learning_rate\", 1e-5)}\"')
 print(f'BATCH_SIZE=\"{t.get(\"batch_size\", 4)}\"')
 print(f'MICRO_BATCH_SIZE=\"{t.get(\"micro_batch_size\", 4)}\"')
@@ -84,12 +97,8 @@ print(f'CHECKPOINT_INTERVAL=\"{t.get(\"checkpoint_interval\", 0)}\"')
 print(f'CHECKPOINT_INTERVAL_SECONDS=\"{t.get(\"checkpoint_interval_seconds\", 0)}\"')
 print(f'MAX_LENGTH=\"{t.get(\"max_length\", 0)}\"')
 print(f'MAX_TOTAL_LENGTH=\"{t.get(\"max_total_length\", 0)}\"')
-print(f'DATAPATH=\"{t.get(\"datapath\", \"output/teacher_answers\")}\"')
-print(f'USE_WANDB=\"{t.get(\"use_wandb\", False)}\"')
 print(f'DEEPSPEED_PATH=\"{t.get(\"deepspeed_path\", \"\")}\"')
 print(f'DEEPSPEED_PATH_TEACHER=\"{t.get(\"deepspeed_path_teacher\", \"\")}\"')
-# Top-level
-print(f'SYSTEM_PROMPT_PATH=\"{c.get(\"system_prompt_path\", \"\")}\"')
 import json as _json
 _topics = q.get('topics', [])
 if _topics:
@@ -127,11 +136,18 @@ echo "  Tool batches:     ${TOOL_BATCHES}"
 echo "  NLP batches:      ${NLP_BATCHES}"
 echo ""
 
+if [ "${TRAIN_ONLY}" = "True" ]; then
+    echo "=== Skipping data generation, training only ==="
+else
+
 # --- Start vLLM server on VLLM_GPU ---
-echo "Starting vLLM server on GPU ${VLLM_GPU}..."
+# Compute tensor parallel size from number of vLLM GPUs
+VLLM_TP=$(echo "${VLLM_GPU}" | tr ',' '\n' | wc -l)
+
+echo "Starting vLLM server on GPU ${VLLM_GPU} (TP=${VLLM_TP})..."
 CUDA_VISIBLE_DEVICES="${VLLM_GPU}" python3 -u -m vllm.entrypoints.openai.api_server \
     --model "${TEACHER_MODEL}" --dtype auto --api-key token-abc123 \
-    --tensor-parallel-size 1 &
+    --tensor-parallel-size "${VLLM_TP}" &
 VLLM_PID=$!
 
 # Wait for server to be ready (test actual model availability, not just health endpoint)
@@ -241,8 +257,10 @@ wait "${VLLM_PID}" 2>/dev/null || true
 trap - EXIT  # disable cleanup trap since we already stopped it
 sleep 5
 
-# Step 6: Run training — teacher on VLLM_GPU, student on TRAIN_GPU
-echo "[6/6] Training (student on GPU ${TRAIN_GPU}, teacher on GPU ${VLLM_GPU})..."
+fi  # end of data generation block
+
+# Step 6: Run training
+echo "[6/6] Training on GPUs ${TRAIN_GPU}..."
 CHECKPOINT_DIR="output/checkpoints/${RUN_NAME}"
 if [ -f "${CHECKPOINT_DIR}/adapter_model.safetensors" ]; then
     echo "${CHECKPOINT_DIR}/adapter_model.safetensors already exists — skipping."
@@ -297,6 +315,12 @@ else
     if [ -n "${GROUP_NAME}" ]; then
         TRAIN_ARGS+=(--group_name "${GROUP_NAME}")
     fi
+    if [ -n "${CUSTOM_TRAIN_DATA}" ]; then
+        TRAIN_ARGS+=(--custom_train_data "${CUSTOM_TRAIN_DATA}")
+    fi
+    if [ -n "${CUSTOM_VAL_DATA}" ]; then
+        TRAIN_ARGS+=(--custom_val_data "${CUSTOM_VAL_DATA}")
+    fi
     if [ -n "${WARMUP_STEPS}" ]; then
         TRAIN_ARGS+=(--warmup_steps "${WARMUP_STEPS}")
     fi
@@ -315,7 +339,7 @@ else
     if [ -n "${DEEPSPEED_PATH_TEACHER}" ]; then
         TRAIN_ARGS+=(--deepspeed_path_teacher "${DEEPSPEED_PATH_TEACHER}")
     fi
-    CUDA_VISIBLE_DEVICES="${VLLM_GPU},${TRAIN_GPU}" python3 training/train.py "${TRAIN_ARGS[@]}"
+    CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/train.py "${TRAIN_ARGS[@]}"
 fi
 
 echo "=== Pipeline complete ==="

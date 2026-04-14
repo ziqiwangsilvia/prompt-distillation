@@ -32,9 +32,10 @@ from training.utils import (
 
 
 class Trainer:
-    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None):
+    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None, teacher_model=None):
         self.base_llm = base_llm
         self.teacher_tokenizer = teacher_llm.tokenizer if teacher_llm else None
+        self.teacher_model = teacher_model
         self.hp = hp
         self.accelerator = self._init_run()
 
@@ -147,20 +148,24 @@ class Trainer:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
-                teacher_llm = LLM(hp.teacher, opening_message=hp.opening_message)
-                if hp.deepspeed_path:
-                    accelerator.state.select_deepspeed_plugin("teacher")
-                    teacher = teacher_llm.load_model(training=False, deepspeed=True)
-                    teacher = accelerator.prepare(teacher)
+                teacher = self.teacher_model
+                n_gpus = torch.cuda.device_count()
+                self.log(f"CUDA devices: {n_gpus}, accelerator device: {accelerator.device}")
+                if n_gpus > 1:
+                    # Build explicit device map
+                    layers = teacher.model.layers
+                    mid = len(layers) // 2
+                    device_map = {"model.embed_tokens": 0, "model.norm": 1, "lm_head": 1}
+                    if hasattr(teacher.model, "rotary_emb"):
+                        device_map["model.rotary_emb"] = 0
+                    for i in range(len(layers)):
+                        device_map[f"model.layers.{i}"] = 0 if i < mid else 1
+                    from accelerate import dispatch_model
+                    dispatch_model(teacher, device_map=device_map)
+                    self.log(f"Teacher split: {mid}/{len(layers)-mid} layers on cuda:0/cuda:1")
                 else:
-                    teacher = teacher_llm.load_model(training=False, deepspeed=False)
-                    # Place teacher on a separate GPU if available
-                    n_gpus = torch.cuda.device_count()
-                    teacher_device = torch.device(f"cuda:{n_gpus - 1}") if n_gpus > 1 else accelerator.device
-                    if hp.mixed_precision == "bf16":
-                        teacher = teacher.to(dtype=torch.bfloat16)
-                    teacher = teacher.to(teacher_device)
-                    self.log(f"Teacher on {teacher_device}")
+                    teacher.to(accelerator.device)
+                    self.log(f"Teacher on {accelerator.device}")
                 teacher.eval()
 
                 # Projection for cross-family distillation (different vocab sizes)

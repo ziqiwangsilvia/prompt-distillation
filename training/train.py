@@ -33,41 +33,50 @@ def main(args: AllArgs):
 
     # Create teacher LLM for tokenization if using a separate teacher model
     teacher_llm = None
-    if (args.logit_loss_weight) and args.teacher not in {"student", "student_base"}:
+    teacher_model = None
+    if args.logit_loss_weight and args.teacher not in {"student", "student_base"}:
         from models.configs import MODEL_CONFIGS
         from models.messages import Message, Role
         teacher_config = MODEL_CONFIGS[args.teacher]
         teacher_opening = Message(Role.SYSTEM, teacher_config.system_message)
         teacher_llm = LLM(args.teacher, opening_message=teacher_opening)
-
+        # Load teacher to CPU (no device_map to avoid accelerate conflicts)
+        import torch
+        teacher_model = teacher_llm.load_model(training=True)
+        teacher_model = teacher_model.to(torch.bfloat16)
     # Build data file list
-    lesson_model_flags = create_model_flags(args.lesson_model)
-    exam_model_flags = create_model_flags(args.exam_model)
+    if args.custom_train_data:
+        train_file = args.custom_train_data
+        val_file = args.custom_val_data if args.custom_val_data else None
+        args.datapath = ""  # custom paths are absolute, not relative to datapath
+    else:
+        lesson_model_flags = create_model_flags(args.lesson_model)
+        exam_model_flags = create_model_flags(args.exam_model)
 
-    train_file = generate_augmented_filename(
-        lesson_filename=generate_lesson_name(
-            dataset_family=args.dataset_family, dataset=args.dataset,
-            variant=args.variant, model=args.question_model,
-            questions=args.train_questions, temperature=args.question_temperature,
-            max_items=args.max_items_train,
-        ),
-        n_choices=args.lesson_num_choices, temperature=args.lesson_temp,
-        model_flags=lesson_model_flags,
-        partition_idx=args.partition_idx, partition_type=args.partition_type,
-    )
+        train_file = generate_augmented_filename(
+            lesson_filename=generate_lesson_name(
+                dataset_family=args.dataset_family, dataset=args.dataset,
+                variant=args.variant, model=args.question_model,
+                questions=args.train_questions, temperature=args.question_temperature,
+                max_items=args.max_items_train,
+            ),
+            n_choices=args.lesson_num_choices, temperature=args.lesson_temp,
+            model_flags=lesson_model_flags,
+            partition_idx=args.partition_idx, partition_type=args.partition_type,
+        )
 
-    val_file = generate_augmented_filename(
-        lesson_filename=generate_exam_name(
-            dataset_family=args.dataset_family, dataset=args.dataset,
-            variant=args.variant, max_items=args.max_items_test,
-        ),
-        n_choices=args.exam_num_choices, temperature=args.exam_temp,
-        model_flags=exam_model_flags,
-    )
+        val_file = generate_augmented_filename(
+            lesson_filename=generate_exam_name(
+                dataset_family=args.dataset_family, dataset=args.dataset,
+                variant=args.variant, max_items=args.max_items_test,
+            ),
+            n_choices=args.exam_num_choices, temperature=args.exam_temp,
+            model_flags=exam_model_flags,
+        )
 
-    data = [[train_file], [val_file] if args.validate else []]
+    data = [[train_file], [val_file] if (args.validate and val_file) else []]
 
-    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm)
+    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm, teacher_model=teacher_model)
     trainer.train()
 
 

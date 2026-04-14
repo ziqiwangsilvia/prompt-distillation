@@ -127,10 +127,11 @@ class LLM:
         return terminators
 
     def load_model(
-        self, training: bool = False, deepspeed: bool = False
+        self, training: bool = False, deepspeed: bool = False, device_map=None
     ):
         torch_dtype = torch.bfloat16
-        device_map = None if training else "auto"
+        if device_map is None:
+            device_map = None if training else "auto"
 
         t0 = time.perf_counter()
         base_model = AutoModelForCausalLM.from_pretrained(

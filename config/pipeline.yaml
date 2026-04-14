@@ -1,5 +1,13 @@
 # Pipeline configuration
 
+project:
+  run_name: test_mvp
+  group_name: null
+  train_only: true
+  use_wandb: false
+  system_prompt_path: context/financial_system_prompt_notool_qwen.txt
+  tools_schema_path: context/financial_tools_schema_20260401.json
+
 models:
   teacher: qwen2.5-72b-instruct
   student: llama3-8b-instruct
@@ -8,13 +16,16 @@ dataset:
   family: financial
   name: tool_calling
   variant: default
+  datapath: output/teacher_answers
+  custom_train_data: "/fsx/shared/processed-data/llms/distillation/distillation.json"
+  custom_val_data: "/fsx/shared/processed-data/llms/validation/validation.json"
   distractor_dataset: ""
   partition_idx: null
   partition_type: null
 
 gpu:
-  vllm: 0
-  train: 1
+  vllm: "0,1"
+  train: "0,1"
   vllm_host: localhost
 
 questions:
@@ -42,11 +53,8 @@ teacher_answers:
   exam_temp: 0.25
   max_total_tokens: 4096
   max_new_tokens: 500
-  tools_schema_path: context/financial_tools_schema_20260401.json
 
 training:
-  run_name: test_json
-  group_name: null
   learning_rate: 1e-5
   batch_size: 4
   micro_batch_size: 2
@@ -74,10 +82,5 @@ training:
   checkpoint_interval_seconds: 0
   max_length: 0
   max_total_length: 0
-  datapath: output/teacher_answers
-  use_wandb: false
   deepspeed_path: ""
   deepspeed_path_teacher: ""
-
-# Leave empty to auto-detect from teacher model family
-system_prompt_path: context/financial_system_prompt_notool_qwen.txt

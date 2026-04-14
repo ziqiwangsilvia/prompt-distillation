@@ -28,9 +28,9 @@ def build_dataloaders(base_llm: LLM, data, hp, teacher_llm: LLM = None):
     train_files, val_files = data
 
     # Datasets
-    logit_train_ds = _init_logit_dataset(base_llm, train_files, hp, teacher_llm=teacher_llm) if (hp.logit_loss_weight) else None
+    logit_train_ds = _init_logit_dataset(base_llm, train_files, hp, teacher_llm=teacher_llm) if hp.logit_loss_weight else None
     token_train_ds = _init_token_dataset(base_llm, train_files, hp) if hp.token_loss_weight else None
-    logit_val_ds = StudentTeacherDataset(base_llm, val_files, datapath=hp.datapath, teacher_llm=teacher_llm) if (hp.logit_loss_weight) and val_files else None
+    logit_val_ds = StudentTeacherDataset(base_llm, val_files, datapath=hp.datapath, teacher_llm=teacher_llm) if hp.logit_loss_weight and val_files else None
     token_val_ds = TeacherDataset(base_llm, val_files, datapath=hp.datapath) if hp.token_loss_weight and val_files else None
 
     # Train loaders
@@ -62,7 +62,7 @@ def build_dataloaders(base_llm: LLM, data, hp, teacher_llm: LLM = None):
 
 def _init_logit_dataset(base_llm, filenames, hp, teacher_llm=None):
     ds = StudentTeacherDataset(base_llm, filenames, verbose=hp.verbose, datapath=hp.datapath, max_length=hp.max_length, teacher_llm=teacher_llm)
-    if (hp.logit_loss_weight) and len(ds) == 0:
+    if hp.logit_loss_weight and len(ds) == 0:
         raise ValueError("No logit training data found.")
     return ds
 
