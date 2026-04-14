@@ -165,20 +165,23 @@ def run_inference(
         if GUARD_PHRASE in pred_text:
             guard_pred_total += 1
 
-        when2call_scores.append(get_when2call(gt, pred))
+        when2call = get_when2call(gt, pred)
+        when2call_scores.append(when2call)
 
-        pickup, halluc, additional = get_tool_pickup_and_hallucination(gt, pred, AVAILABLE_TOOLS)
-        if pickup is not None:
-            pickup_scores.append(pickup)
-            hallucination_scores.append(halluc)
-            additional_scores.append(additional)
+        if when2call:
+            pickup, halluc, additional = get_tool_pickup_and_hallucination(gt, pred, AVAILABLE_TOOLS)
+            if pickup is not None:
+                pickup_scores.append(pickup)
+                hallucination_scores.append(halluc)
+                additional_scores.append(additional)
 
-        vp, vc, vh, va = get_variable_parsing_and_hallucination(gt, pred, TOOL_SCHEMAS)
-        if vp is not None:
-            var_pickup_scores.append(vp)
-            var_correct_scores.append(vc)
-            var_hallucination_scores.append(vh)
-            var_additional_scores.append(va)
+                if pickup:
+                    vp, vc, vh, va = get_variable_parsing_and_hallucination(gt, pred, TOOL_SCHEMAS)
+                    if vp is not None:
+                        var_pickup_scores.append(vp)
+                        var_correct_scores.append(vc)
+                        var_hallucination_scores.append(vh)
+                        var_additional_scores.append(va)
 
         em = get_exact_match(gt, pred)
         if em is not None:

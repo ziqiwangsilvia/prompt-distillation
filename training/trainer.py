@@ -4,7 +4,6 @@ import os
 import pprint
 import sys
 import time
-from functools import partial
 from itertools import cycle
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,18 +14,15 @@ import torch
 from accelerate import Accelerator, DeepSpeedPlugin
 from accelerate.utils import ProjectConfiguration
 from peft import get_peft_model
-from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 import wandb
 
 from models.llm import LLM
 from models.utils import DualOutput, num_parameters
-from training import PADDING_VALUE
 from evaluation.metrics import Aggregator
-from data.dataset import StudentTeacherDataset, TeacherDataset
+from data.dataloader import build_dataloaders
 from training.loss import compute_token_loss, compute_logit_loss
 from training.utils import (
-    InfiniteSampler,
     generate_answers,
     save_with_base_model_config,
     save_with_deepspeed,
@@ -41,42 +37,13 @@ class Trainer:
         self.accelerator = self._init_run()
 
         # Data
-        logit_train_files, logit_val_files = data
-        token_train_files, token_val_files = data
+        self.logit_train_ds, self.token_train_ds, \
+            self.logit_loader, self.token_loader, \
+            self.logit_val_loader, self.token_val_loader = build_dataloaders(base_llm, data, hp)
 
-        self.logit_train_ds = self._init_logit_dataset(logit_train_files) if hp.logit_loss_weight else None
-        self.token_train_ds = self._init_token_dataset(token_train_files) if hp.token_loss_weight else None
-        logit_val_ds = StudentTeacherDataset(base_llm, logit_val_files, datapath=hp.datapath) if hp.logit_loss_weight and logit_val_files else None
-        token_val_ds = TeacherDataset(base_llm, token_val_files, datapath=hp.datapath) if hp.token_loss_weight and token_val_files else None
-
-        # Train loaders
-        self.logit_loader = self._make_loader(
-            self.logit_train_ds, hp.logit_loss_micro_batch_size,
-            partial(self.logit_train_ds.collate_fn, padding_value=PADDING_VALUE, llm=base_llm),
-            shuffle=True,
-        ) if self.logit_train_ds else None
-
-        self.token_loader = self._make_loader(
-            self.token_train_ds, hp.token_loss_micro_batch_size,
-            partial(self.token_train_ds.collate_fn, padding_value=PADDING_VALUE, llm=base_llm, max_total_length=hp.max_total_length),
-            sampler=InfiniteSampler(len(self.token_train_ds)),
-        ) if self.token_train_ds else None
-
-        # Val loaders
-        self.logit_val_loader = self._make_loader(
-            logit_val_ds, hp.logit_loss_micro_batch_size,
-            partial(StudentTeacherDataset.collate_fn, padding_value=PADDING_VALUE, llm=base_llm),
-        ) if logit_val_ds else None
-
-        self.token_val_loader = self._make_loader(
-            token_val_ds, hp.token_loss_micro_batch_size,
-            partial(token_val_ds.collate_fn, padding_value=PADDING_VALUE, llm=base_llm),
-        ) if token_val_ds else None
-
-        if hp.verbose:
-            token_count = len(self.token_train_ds) if self.token_train_ds else 0
-            logit_count = len(self.logit_train_ds) if self.logit_train_ds else 0
-            print(f"Training data: token loss: {token_count} examples, logit loss: {logit_count} examples\n\n")
+        token_count = len(self.token_train_ds) if self.token_train_ds else 0
+        logit_count = len(self.logit_train_ds) if self.logit_train_ds else 0
+        self.log(f"Training data: token loss: {token_count} examples, logit loss: {logit_count} examples\n")
 
         # Prepare with accelerator
         self.logit_loader, self.token_loader, self.logit_val_loader, self.token_val_loader = self.accelerator.prepare(
@@ -94,6 +61,12 @@ class Trainer:
         else:
             self.n_batches = math.ceil(len(self.token_train_ds) / hp.n_token_micro_batches_per_batch / hp.token_loss_micro_batch_size / hp.devices)
         self.max_steps = hp.n_epochs * self.n_batches
+
+    # ── Logging ────────────────────────────────────────────
+
+    def log(self, *args, **kwargs):
+        if self.hp.verbose:
+            print(*args, flush=True, **kwargs)
 
     # ── Setup ──────────────────────────────────────────────
 
@@ -126,9 +99,8 @@ class Trainer:
 
         sys.stdout = DualOutput(hp.run_project_dir / f"output_{accelerator.process_index}.log")
 
-        if hp.verbose:
-            print("Run name:", hp.run_name)
-            pprint.pprint(hp)
+        self.log("Run name:", hp.run_name)
+        self.log(pprint.pformat(vars(hp) if hasattr(hp, '__dict__') else hp))
 
         hp.log_to_wandb = hp.use_wandb and accelerator.is_main_process
         if hp.log_to_wandb:
@@ -149,64 +121,38 @@ class Trainer:
         base_llm = self.base_llm
         accelerator = self.accelerator
 
-        if hp.verbose:
-            print("Loading student model", flush=True)
-
+        self.log("Loading student model")
         student = base_llm.load_model(training=True, deepspeed=bool(hp.deepspeed_path))
-
-        if hp.verbose:
-            print(f"Trainable params: {num_parameters(student, True):,},  Frozen params: {num_parameters(student, False):,}", flush=True)
-            print("Preparing student LoRA", flush=True)
+        self.log(f"Trainable params: {num_parameters(student, True):,},  Frozen params: {num_parameters(student, False):,}")
+        self.log("Preparing student LoRA")
 
         student = get_peft_model(student, hp.peft_config)
         if hp.mixed_precision == "bf16" and not hp.deepspeed_path:
             student = student.to(torch.bfloat16)
 
-        if hp.verbose:
-            print("PEFT student built.")
-            print(student)
-            print(f"Trainable params: {num_parameters(student, True):,},  Frozen params: {num_parameters(student, False):,}", flush=True)
-
-        if hp.teacher in {"student", "student_base"}:
-            teacher = hp.teacher
-            teacher_llm = None
-        else:
-            teacher_llm = LLM(hp.teacher, opening_message=hp.opening_message)
+        self.log("PEFT student built.")
+        self.log(student)
+        self.log(f"Trainable params: {num_parameters(student, True):,},  Frozen params: {num_parameters(student, False):,}")
 
         optimizer = torch.optim.AdamW(student.parameters(), lr=hp.learning_rate, weight_decay=hp.weight_decay)
 
         accelerator.register_for_checkpointing(student)
         student, optimizer = accelerator.prepare(student, optimizer)
 
-        if teacher_llm:
-            accelerator.state.select_deepspeed_plugin("teacher")
-            teacher = teacher_llm.load_model(training=False, deepspeed=True)
-            teacher = accelerator.prepare(teacher)
-            teacher.eval()
-        else:
-            teacher = teacher_llm or teacher
+        teacher = None
+        if hp.logit_loss_weight:
+            if hp.teacher in {"student", "student_base"}:
+                teacher = hp.teacher
+            else:
+                teacher_llm = LLM(hp.teacher, opening_message=hp.opening_message)
+                accelerator.state.select_deepspeed_plugin("teacher")
+                teacher = teacher_llm.load_model(training=False, deepspeed=True)
+                teacher = accelerator.prepare(teacher)
+                teacher.eval()
 
-        if hp.verbose:
-            print("Student bf16:", _model_is_bf16(student))
+        self.log("Student bf16:", _model_is_bf16(student))
 
         return student, teacher, optimizer
-
-    def _init_logit_dataset(self, filenames):
-        hp = self.hp
-        ds = StudentTeacherDataset(self.base_llm, filenames, verbose=hp.verbose, datapath=hp.datapath, max_length=hp.max_length)
-        if hp.logit_loss_weight and len(ds) == 0:
-            raise ValueError("No logit training data found.")
-        return ds
-
-    def _init_token_dataset(self, filenames):
-        hp = self.hp
-        return TeacherDataset(self.base_llm, filenames, verbose=hp.verbose, datapath=hp.datapath, max_length=hp.max_length, distractor_dataset=hp.distractor_dataset)
-
-    @staticmethod
-    def _make_loader(dataset, batch_size, collate_fn, sampler=None, shuffle=False):
-        if dataset is None or batch_size == 0:
-            return None
-        return DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn, sampler=sampler, shuffle=shuffle if sampler is None else False)
 
     # ── Training ───────────────────────────────────────────
 
@@ -214,16 +160,14 @@ class Trainer:
         hp = self.hp
         accelerator = self.accelerator
 
-        if hp.verbose:
-            print(f"Training for {hp.n_epochs} epochs, {self.max_steps} iterations", flush=True)
+        self.log(f"Training for {hp.n_epochs} epochs, {self.max_steps} iterations")
 
         # Warmup
         if hasattr(hp, 'warmup_steps') and hp.warmup_steps is not None:
             pass
         elif hasattr(hp, 'warmup_ratio'):
             hp.warmup_steps = int(hp.warmup_ratio * self.max_steps)
-        if hp.verbose:
-            print(f"Learning rate warmup: {hp.warmup_steps} steps", flush=True)
+        self.log(f"Learning rate warmup: {hp.warmup_steps} steps")
 
         train_t0 = time.perf_counter()
         self.student.train()
@@ -244,10 +188,8 @@ class Trainer:
         for step in range(self.max_steps + 1):
             # Validate
             if hp.validate and step % hp.eval_interval == 0:
-                t0 = time.perf_counter()
                 metrics_total, metrics_by_group = self.validate()
-                if hp.verbose:
-                    print("Validation results:", metrics_total, flush=True)
+                self.log("Validation results:", metrics_total)
                 self._log_to_wandb(metrics_total, metrics_by_group, step)
 
             # Generate
@@ -264,7 +206,7 @@ class Trainer:
                     generate_answers(self.base_llm, generation_samples, accelerator)
 
             if step == self.max_steps:
-                print("Finishing training, saving model")
+                self.log("Finishing training, saving model")
                 break
 
             is_logging = step % hp.log_interval == 0
@@ -317,7 +259,7 @@ class Trainer:
         if hp.save:
             self.save()
 
-        print(f"Training time: {(time.perf_counter() - train_t0):.2f}s", flush=True)
+        self.log(f"Training time: {(time.perf_counter() - train_t0):.2f}s")
 
     # ── Loss ───────────────────────────────────────────────
 
@@ -396,12 +338,11 @@ class Trainer:
         all_losses.append(loss_val)
         avg_loss = sum(all_losses) / len(all_losses)
         loss_type = 'logit' if 'logit_loss' in train_metrics else 'token'
-        print(
+        self.log(
             f"Step {step + 1}/{self.max_steps}: {loss_type} loss {loss_val:.8f}, "
             f"iter time: {(t1 - step_t0) * 1000:.2f}ms, "
             f"avg iter time: {np.mean(step_times):.2f}ms, "
             f"Total avg loss {avg_loss:.4f}",
-            flush=True,
         )
         if self.hp.log_to_wandb:
             train_metrics['step_time'] = (t1 - step_t0) * 1000
