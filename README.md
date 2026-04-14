@@ -106,6 +106,25 @@ For all HotpotQA experiments, use
 
 We use the the four variants (Amazon, New Wiki, NYT, Reddit) of Squadshift from HuggingFace, and the distractor-dataset from HotpotQA. Our evaluation set (1000 questions / dataset) can be found in datasets/
 
+## Cross-Tokenizer Distillation
+
+When the teacher and student use different tokenizers (e.g., Qwen → Llama), token-level KL divergence requires alignment since the same text produces different token sequences.
+
+We use character-span alignment: each tokenizer provides character offsets for its tokens via `return_offsets_mapping=True`. For each student token, we find overlapping teacher tokens and compute weights proportional to the number of shared characters.
+
+For example, given the text `"unhappiness"`:
+- Student tokens: `["unhapp", "iness"]` → spans `(0,6)`, `(6,11)`
+- Teacher tokens: `["un", "happi", "ness"]` → spans `(0,2)`, `(2,7)`, `(7,11)`
+
+The alignment weight for student token `"unhapp"` (0-6):
+- `"un"` (0-2): overlap = 2 → weight 2/6
+- `"happi"` (2-7): overlap = 4 → weight 4/6
+- `"ness"` (7-11): overlap = 0
+
+The aligned teacher distribution at each student position is a weighted average of overlapping teacher token probabilities (in probability space, not logit space), then KL divergence is computed on the result.
+
+When vocab sizes differ, a learned bottleneck projection (`VocabProjection`) maps teacher logits to the student vocab space before alignment.
+
 ## Other repositories
 
 For MMLU-Pro evaluation, we used the following repo:
