@@ -161,7 +161,17 @@ class Trainer:
                     for i in range(len(layers)):
                         device_map[f"model.layers.{i}"] = 0 if i < mid else 1
                     from accelerate import dispatch_model
+                    import subprocess, threading
+                    stop_mon = threading.Event()
+                    def _gpu_mon():
+                        while not stop_mon.is_set():
+                            out = subprocess.check_output(["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader"], text=True).strip()
+                            print(f"  [GPU] {out.replace(chr(10), ' | ')}", flush=True)
+                            stop_mon.wait(5)
+                    mon = threading.Thread(target=_gpu_mon, daemon=True)
+                    mon.start()
                     dispatch_model(teacher, device_map=device_map)
+                    stop_mon.set()
                     self.log(f"Teacher split: {mid}/{len(layers)-mid} layers on cuda:0/cuda:1")
                 else:
                     teacher.to(accelerator.device)
