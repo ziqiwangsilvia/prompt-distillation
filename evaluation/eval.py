@@ -36,16 +36,20 @@ def run_inference(
     student_base = cfg["models"]["student"]
     variant = "default"
     if not run_name:
-        run_name = cfg["training"]["run_name"]
+        run_name = cfg.get("project", {}).get("run_name", cfg.get("training", {}).get("run_name", ""))
 
     # Load eval exercises
+    custom_val = cfg.get("dataset", {}).get("custom_val_data", "")
     from models.configs import create_model_flags, get_model_config
     from data.naming import generate_augmented_filename, generate_exam_name
+    if custom_val:
+        eval_path = Path(custom_val)
+    else:
 
-    base_exam_id = generate_exam_name(dataset_family, dataset, variant, max_items)
-    exam_flags = create_model_flags(exam_model)
-    eval_file = generate_augmented_filename(base_exam_id, temperature=0.25, model_flags=exam_flags)
-    eval_path = BASE_PATH / "output" / "teacher_answers" / eval_file
+        base_exam_id = generate_exam_name(dataset_family, dataset, variant, max_items)
+        exam_flags = create_model_flags(exam_model)
+        eval_file = generate_augmented_filename(base_exam_id, temperature=0.25, model_flags=exam_flags)
+        eval_path = BASE_PATH / "output" / "teacher_answers" / eval_file
 
     if not eval_path.exists():
         raise FileNotFoundError(f"Eval data not found: {eval_path}")
