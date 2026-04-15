@@ -7,6 +7,7 @@ from torch.nn.utils.rnn import pad_sequence
 from typing import List, Dict, Any, Optional
 
 from data.paths import DATA_PATH
+from data.tool_call_format import to_native_format, normalize_tool_call
 from models.messages import Role, QUESTION_PLACEHOLDER
 from curriculum.exercise_with_answers import ExerciseWithAnswers
 from training import IGNORE_INDEX
@@ -15,10 +16,17 @@ from training.utils import tokenize_teacher_student, read_exercises, ensure_path
 DISTRACTOR_PROB = 0.6
 
 
-def prepare_answer_tokens(llm, content: str, max_length: int, truncated: bool) -> torch.Tensor:
+def prepare_answer_tokens(llm, content: str, max_length: int, truncated: bool, use_tool_token: bool = False) -> torch.Tensor:
     """Tokenize answer content and add EOS."""
+    is_tool = use_tool_token and llm.model_family == "llama" and content.lstrip().startswith('{"name"')
+    if is_tool:
+        content = "<|python_tag|>" + content
     tokens = llm.tokenize(content)
-    tokens = llm.add_eos(tokens)
+    if is_tool:
+        eom_id = llm.tokenizer.convert_tokens_to_ids("<|eom_id|>")
+        tokens = torch.cat([tokens, torch.tensor([[eom_id]])], dim=1)
+    else:
+        tokens = llm.add_eos(tokens)
     if max_length:
         tokens = tokens[:, :max_length]
     return tokens
@@ -38,6 +46,8 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
         max_length: int = 0,
         debug: bool = False,
         teacher_llm=None,
+        tools: list = None,
+        use_tool_token: bool = False,
     ):
         assert isinstance(filenames, list), "filenames should be a list"
         self.samples: List[Dict[str, Any]] = []
@@ -57,7 +67,7 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
             for ex_i, exercise in enumerate(exercises):
                 question = extract_question(exercise)
                 material, _ = extract_material_and_question(exercise)
-                student_closed_tokens, student_open_tokens, teacher_tokens = tokenize_teacher_student(material, question, llm, teacher_llm=teacher_llm)
+                student_closed_tokens, student_open_tokens, teacher_tokens = tokenize_teacher_student(material, question, llm, teacher_llm=teacher_llm, tools=tools, student_tools=tools if use_tool_token else None)
 
                 if verbose and ex_i == 0:
                     print(f"  [Example] Teacher sees: {t_llm.decode(teacher_tokens)[:200]}...")
@@ -65,15 +75,20 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
                     print(f"  [Example] Student (closed) sees: {llm.decode(student_closed_tokens)[:200]}...")
 
                 for choice in exercise.answer_choices:
-                    answer_tokens = prepare_answer_tokens(llm, choice.content, max_length, choice.truncated)
-                    teacher_answer_tokens = prepare_answer_tokens(t_llm, choice.content, max_length, choice.truncated) if teacher_llm else answer_tokens
+                    student_content = choice.content
+                    teacher_content = to_native_format(choice.content, t_llm.model_family) if use_tool_token and teacher_llm else choice.content
+                    alignment_text = normalize_tool_call(choice.content) if use_tool_token and teacher_llm else choice.content
+                    answer_tokens = prepare_answer_tokens(llm, student_content, max_length, choice.truncated, use_tool_token=use_tool_token)
+                    teacher_answer_tokens = prepare_answer_tokens(t_llm, teacher_content, max_length, choice.truncated) if teacher_llm else answer_tokens
                     sample = {
                         "student_prompt_tokens": student_closed_tokens,
                         "student_open_prompt_tokens": student_open_tokens,
                         "teacher_prompt_tokens": teacher_tokens,
                         "answer_tokens": answer_tokens,
                         "teacher_answer_tokens": teacher_answer_tokens,
-                        "teacher_answer": choice.content,
+                        "teacher_answer": alignment_text,
+                        "student_answer_text": student_content,
+                        "teacher_answer_text": teacher_content,
                         "lesson_ix": lesson_ix,
                         "question": question,
                     }
@@ -132,6 +147,8 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
             'teacher_seqs': pad_sequence(teacher_seqs, batch_first=True, padding_value=padding_value),
             'teacher_masks': pad_sequence(teacher_masks, batch_first=True, padding_value=0).bool(),
             'teacher_answers': [sample["teacher_answer"] for sample in samples],
+            'student_answer_texts': [sample.get("student_answer_text", sample["teacher_answer"]) for sample in samples],
+            'teacher_answer_texts': [sample.get("teacher_answer_text", sample["teacher_answer"]) for sample in samples],
             'lesson_ixs': torch.tensor([sample["lesson_ix"] for sample in samples]),
         }
 
@@ -149,6 +166,8 @@ class TeacherDataset(torch.utils.data.Dataset):
         datapath: Path = DATA_PATH,
         max_length: int = 0,
         distractor_dataset: str = "",
+        tools: list = None,
+        use_tool_token: bool = False,
     ):
         assert isinstance(filenames, list), "filenames should be a list"
         self.samples: List[Dict[str, Any]] = []
@@ -170,9 +189,9 @@ class TeacherDataset(torch.utils.data.Dataset):
                     raise NotImplementedError("Multiple choices per answer are not currently supported in token loss training")
 
                 answer_choice = exercise.answer_choices[0]
-                answer_tokens = prepare_answer_tokens(llm, answer_choice.content, max_length, answer_choice.truncated)
+                answer_tokens = prepare_answer_tokens(llm, answer_choice.content, max_length, answer_choice.truncated, use_tool_token=use_tool_token)
                 material, question = extract_material_and_question(exercise)
-                student_closed_tokens, student_open_tokens, _ = tokenize_teacher_student(material, question, llm)
+                student_closed_tokens, student_open_tokens, _ = tokenize_teacher_student(material, question, llm, tools=tools, student_tools=tools if use_tool_token else None)
 
                 if verbose and ex_i == 0:
                     print(f"  [Example] Open-book sees: {llm.decode(student_open_tokens)[:200]}...")

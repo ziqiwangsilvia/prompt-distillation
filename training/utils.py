@@ -83,7 +83,7 @@ def generate_answers(
     return answers
 
 
-def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm: LLM = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm: LLM = None, tools: list = None, student_tools: list = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Tokenize teacher and student prompts using chat template.
     Teacher: material as system message + question (uses teacher_llm tokenizer if provided).
     Student open-book: material as system message + question (student tokenizer).
@@ -95,17 +95,17 @@ def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm
     # Teacher: use material as system message
     saved = t_llm.opening_message
     t_llm.opening_message = Message(Role.SYSTEM, material) if material else None
-    teacher_tokens = t_llm.tokenize(t_llm.messages_to_prompt([Message(Role.USER, question)]))
+    teacher_tokens = t_llm.tokenize(t_llm.messages_to_prompt([Message(Role.USER, question)], tools=tools))
     t_llm.opening_message = saved
 
     # Student open-book: material as system message (student tokenizer)
     saved = llm.opening_message
     llm.opening_message = Message(Role.SYSTEM, material) if material else None
-    student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)]))
+    student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools))
     llm.opening_message = saved
 
     # Student closed-book: default system message
-    student_closed_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)]))
+    student_closed_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools))
 
     return student_closed_tokens, student_open_tokens, teacher_tokens
 

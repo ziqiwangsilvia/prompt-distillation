@@ -76,6 +76,7 @@ print(f'N_EPOCHS=\"{t.get(\"n_epochs\", 2)}\"')
 print(f'LORA_R=\"{t.get(\"lora_r\", 1024)}\"')
 print(f'MIXED_PRECISION=\"{t.get(\"mixed_precision\", \"bf16\")}\"')
 print(f'CLOSED_BOOK=\"{t.get(\"closed_book\", True)}\"')
+print(f'USE_TOOL_TOKEN=\"{t.get(\"use_tool_token\", False)}\"')
 print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
 print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
 print(f'TRAIN_TEMPERATURE=\"{t.get(\"train_temperature\", 2.0)}\"')
@@ -286,6 +287,7 @@ else
         --lora_r "${LORA_R}"
         --mixed_precision "${MIXED_PRECISION}"
         --closed_book "${CLOSED_BOOK}"
+        --use_tool_token "${USE_TOOL_TOKEN}"
         --token_loss_weight "${TOKEN_LOSS_WEIGHT}"
         --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
         --train_temperature "${TRAIN_TEMPERATURE}"
@@ -338,6 +340,9 @@ else
     fi
     if [ -n "${DEEPSPEED_PATH_TEACHER}" ]; then
         TRAIN_ARGS+=(--deepspeed_path_teacher "${DEEPSPEED_PATH_TEACHER}")
+    fi
+    if [ -n "${TOOLS_SCHEMA_PATH}" ]; then
+        TRAIN_ARGS+=(--tools_schema_path "${TOOLS_SCHEMA_PATH}")
     fi
     CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/train.py "${TRAIN_ARGS[@]}"
 fi

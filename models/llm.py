@@ -124,6 +124,9 @@ class LLM:
         terminators = [self.tokenizer.eos_token_id]
         if self.model_family == "llama" and self.llama_eot_token:
             terminators.append(self.llama_eot_token)
+            eom_id = self.tokenizer.convert_tokens_to_ids("<|eom_id|>")
+            if eom_id is not None:
+                terminators.append(eom_id)
         return terminators
 
     def load_model(

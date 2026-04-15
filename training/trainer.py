@@ -32,7 +32,7 @@ from training.utils import (
 
 
 class Trainer:
-    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None, teacher_model=None):
+    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None, teacher_model=None, tools: list = None):
         self.base_llm = base_llm
         self.teacher_tokenizer = teacher_llm.tokenizer if teacher_llm else None
         self.teacher_model = teacher_model
@@ -42,7 +42,7 @@ class Trainer:
         # Data
         self.logit_train_ds, self.token_train_ds, \
             self.logit_loader, self.token_loader, \
-            self.logit_val_loader, self.token_val_loader = build_dataloaders(base_llm, data, hp, teacher_llm=teacher_llm)
+            self.logit_val_loader, self.token_val_loader = build_dataloaders(base_llm, data, hp, teacher_llm=teacher_llm, tools=tools)
 
         token_count = len(self.token_train_ds) if self.token_train_ds else 0
         logit_count = len(self.logit_train_ds) if self.logit_train_ds else 0
@@ -313,6 +313,7 @@ class Trainer:
             closed_book=self.hp.closed_book, projection=self.projection,
             student_tokenizer=self.base_llm.tokenizer,
             teacher_tokenizer=self.teacher_tokenizer,
+            use_tool_token=self.hp.use_tool_token,
         )
 
     # ── Validation ─────────────────────────────────────────

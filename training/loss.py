@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from transformers import PreTrainedModel
 
 from training import IGNORE_INDEX
-from training.projection import build_alignment_weights
+from training.projection import build_alignment_weights, build_shared_alignment
 
 
 def compute_token_loss(
@@ -44,6 +44,7 @@ def compute_logit_loss(
     projection=None,
     student_tokenizer=None,
     teacher_tokenizer=None,
+    use_tool_token: bool = False,
 ) -> torch.Tensor:
     student_inputs, student_masks, batch_size, seq_length = _get_student_masks(batch, closed_book)
     teacher, teacher_context, is_self = _resolve_teacher(student, teacher)
@@ -61,7 +62,9 @@ def compute_logit_loss(
         return _aligned_kl(
             student_logits, teacher_logits, student_masks, teacher_masks,
             batch['teacher_answers'], student_tokenizer, teacher_tokenizer,
-            projection, temperature, reverse_kl,
+            projection, temperature, reverse_kl, use_tool_token=use_tool_token,
+            student_answer_texts=batch.get('student_answer_texts'),
+            teacher_answer_texts=batch.get('teacher_answer_texts'),
         )
 
     return _flat_kl(
@@ -120,12 +123,35 @@ def _kl(s_log_probs, t_log_probs, reverse_kl):
 
 def _aligned_kl(student_logits, teacher_logits, student_masks, teacher_masks,
                 teacher_answers, student_tokenizer, teacher_tokenizer,
-                projection, temperature, reverse_kl):
+                projection, temperature, reverse_kl, use_tool_token=False,
+                student_answer_texts=None, teacher_answer_texts=None):
     """Per-sample KL with character-span alignment for cross-tokenizer distillation."""
     losses = []
     for i in range(student_logits.size(0)):
         s_logits_i = student_logits[i][student_masks[i]]
         t_logits_i = teacher_logits[i][teacher_masks[i]]
+        align_text = teacher_answers[i]
+        is_tool = use_tool_token and align_text.lstrip().startswith('{"')
+
+        if is_tool and student_answer_texts and teacher_answer_texts:
+            # Shared-content alignment: trim format tokens, align on common content
+            s_text = student_answer_texts[i]
+            t_text = teacher_answer_texts[i]
+            align, s_idx, t_idx = build_shared_alignment(
+                student_tokenizer, teacher_tokenizer, s_text, t_text, align_text)
+
+            # Select only shared-content logits (no EOS — token loss handles end tokens)
+            s_sel = [s_logits_i[j + 1] for j in s_idx]
+            t_sel = [t_logits_i[j] for j in t_idx]
+            s_logits_i = torch.stack(s_sel)
+            t_logits_i = torch.stack(t_sel)
+            # Drop EOS row/col from alignment
+            align = align[:-1, :-1]
+        else:
+            align = build_alignment_weights(student_tokenizer, teacher_tokenizer, align_text)
+            # Drop EOS from logits — token loss handles end tokens
+            s_logits_i = s_logits_i[:-1]
+            t_logits_i = t_logits_i[:-1]
 
         # Project vocab before alignment if needed
         if projection is not None:
@@ -133,7 +159,6 @@ def _aligned_kl(student_logits, teacher_logits, student_masks, teacher_masks,
 
         # Align in probability space
         t_probs = F.softmax(t_logits_i / temperature, dim=-1)
-        align = build_alignment_weights(student_tokenizer, teacher_tokenizer, teacher_answers[i])
         align = align.to(device=t_probs.device, dtype=t_probs.dtype)
         aligned_probs = align @ t_probs
         t_lp = aligned_probs.clamp(min=1e-8).log()

@@ -1,7 +1,7 @@
 # Pipeline configuration
 
 project:
-  run_name: test_mvp
+  run_name: test_json
   group_name: null
   train_only: true
   use_wandb: false
@@ -10,15 +10,15 @@ project:
 
 models:
   teacher: qwen2.5-72b-instruct
-  student: llama3-8b-instruct
+  student: llama3.1-8b-instruct
 
 dataset:
   family: financial
   name: tool_calling
   variant: default
   datapath: output/teacher_answers
-  custom_train_data: "/fsx/shared/processed-data/llms/distillation/distillation.json"
-  custom_val_data: "/fsx/shared/processed-data/llms/validation/validation.json"
+  custom_train_data: ""
+  custom_val_data: ""
   distractor_dataset: ""
   partition_idx: null
   partition_type: null
@@ -57,11 +57,12 @@ teacher_answers:
 training:
   learning_rate: 1e-5
   batch_size: 4
-  micro_batch_size: 2
+  micro_batch_size: 1
   n_epochs: 2
   lora_r: 256
   mixed_precision: bf16
   closed_book: true
+  use_tool_token: true
   token_loss_weight: 1.0
   logit_loss_weight: 0.5
   train_temperature: 2.0

@@ -72,6 +72,34 @@ def format_tool_call(tool_call: dict, target_family: str) -> str:
 
 # --- Convert ---
 
+def to_native_format(content: str, model_family: str) -> str:
+    """Convert stored Llama-format tool call to a model's native format.
+    Non-tool-call text is returned unchanged."""
+    if not content.lstrip().startswith('{"name"'):
+        return content
+    if model_family == "qwen":
+        try:
+            parsed = json.loads(content)
+            tc = {"name": parsed["name"], "arguments": parsed.get("parameters", parsed.get("arguments", {}))}
+            return format_tool_call_qwen(tc)
+        except (json.JSONDecodeError, KeyError):
+            return content
+    return content
+
+
+def normalize_tool_call(content: str) -> str:
+    """Normalize a tool call to common form for alignment: just name + args as sorted JSON.
+    Non-tool-call text is returned unchanged."""
+    if not content.lstrip().startswith('{"name"'):
+        return content
+    try:
+        parsed = json.loads(content)
+        args = parsed.get("parameters", parsed.get("arguments", {}))
+        return json.dumps({"name": parsed["name"], "arguments": args}, sort_keys=True)
+    except (json.JSONDecodeError, KeyError):
+        return content
+
+
 def convert_tool_call_format(text: str, source_family: str, target_family: str) -> str:
     """Convert tool-call text from source model format to target model format.
     

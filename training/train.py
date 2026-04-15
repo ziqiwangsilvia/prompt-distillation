@@ -76,7 +76,15 @@ def main(args: AllArgs):
 
     data = [[train_file], [val_file] if (args.validate and val_file) else []]
 
-    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm, teacher_model=teacher_model)
+    # Load tools schema if use_tool_token is enabled
+    tools = None
+    if args.use_tool_token and args.tools_schema_path:
+        import json
+        with open(args.tools_schema_path) as f:
+            tools = json.load(f)
+        print(f"Loaded {len(tools)} tool definitions from {args.tools_schema_path}", flush=True)
+
+    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm, teacher_model=teacher_model, tools=tools)
     trainer.train()
 
 

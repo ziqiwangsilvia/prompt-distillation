@@ -12,8 +12,8 @@ class ModelConfig:
 
 # Model configurations
 MODEL_CONFIGS = {
-    "llama3-8b-instruct": ModelConfig(
-        name="llama3-8b-instruct",
+    "llama3.1-8b-instruct": ModelConfig(
+        name="llama3.1-8b-instruct",
         vllm_model="meta-llama/Llama-3.1-8B-Instruct",
         system_message="You are a knowledgeable assistant trained to provide accurate and helpful information. Please respond to the user's queries promptly.",
         flag_name="llama3_8b",

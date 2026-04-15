@@ -72,6 +72,14 @@ def run_inference(
         student_cfg = get_model_config(student_base)
         llm = LLM(student_base, opening_message=Message(Role.SYSTEM, student_cfg.system_message))
 
+        tools = None
+        if cfg.get("training", {}).get("use_tool_token", False):
+            tools_path = cfg.get("project", {}).get("tools_schema_path", "")
+            if tools_path:
+                with open(tools_path) as tf:
+                    tools = json.load(tf)
+                print(f"Loaded {len(tools)} tool definitions from {tools_path}")
+
         questions = []
         refs = []
         prompts = []
@@ -80,7 +88,7 @@ def run_inference(
             questions.append(student_content)
             refs.append(ex.answer_choices[0].content if ex.answer_choices else None)
             msgs = [Message(Role.USER, student_content)]
-            prompts.append(llm.messages_to_prompt(msgs))
+            prompts.append(llm.messages_to_prompt(msgs, tools=tools))
 
         # Run inference
         if vllm_host:
@@ -96,15 +104,17 @@ def run_inference(
 
         # Build results
         results = []
-        for i, (q, ref, (output, truncated)) in enumerate(zip(questions, refs, outputs)):
+        for i, (q, ref, (output, truncated, has_tool_token)) in enumerate(zip(questions, refs, outputs)):
             results.append({
                 "index": i,
                 "question": q,
                 "prediction": output,
                 "truncated": truncated,
+                "has_tool_token": has_tool_token,
                 "reference": ref,
             })
-            print(f"[{i+1}/{len(questions)}] Pred: {output[:80]}...")
+            tag = " [python_tag]" if has_tool_token else ""
+            print(f"[{i+1}/{len(questions)}]{tag} Pred: {output[:80]}...")
 
         with open(output_file, "w") as f:
             for r in results:
@@ -177,7 +187,8 @@ def run_inference(
             if pickup is not None:
                 pickup_scores.append(pickup)
                 hallucination_scores.append(halluc)
-                additional_scores.append(additional)
+                if pickup:
+                    additional_scores.append(additional)
 
                 if pickup:
                     vp, vc, vh, va = get_variable_parsing_and_hallucination(gt, pred, TOOL_SCHEMAS)
@@ -238,9 +249,10 @@ def _vllm_inference(host, model, prompts, temperature, max_new_tokens):
     outputs = []
     for resp in responses:
         if isinstance(resp, Exception):
-            outputs.append(("ERROR: " + str(resp), True))
+            outputs.append(("ERROR: " + str(resp), True, False))
         else:
-            outputs.append((resp.choices[0].text.strip(), resp.choices[0].finish_reason != "stop"))
+            text = resp.choices[0].text.strip()
+            outputs.append((text, resp.choices[0].finish_reason != "stop", "<|python_tag|>" in resp.choices[0].text))
     return outputs
 
 
@@ -267,8 +279,10 @@ def _local_inference(llm, prompts, temperature, max_new_tokens, batch_size=8):
             prompt_len = encoded["input_ids"].shape[1]
             gen_ids = output_ids[prompt_len:]
             truncated = bool(gen_ids[-1] not in terminators)
+            python_tag_id = llm.tokenizer.convert_tokens_to_ids("<|python_tag|>")
+            has_tool_token = python_tag_id in gen_ids.tolist()
             text = llm.tokenizer.decode(gen_ids, skip_special_tokens=True)
-            outputs.append((text.strip(), truncated))
+            outputs.append((text.strip(), truncated, has_tool_token))
         print(f"  {min(i+batch_size, len(prompts))}/{len(prompts)} done")
     return outputs
 
