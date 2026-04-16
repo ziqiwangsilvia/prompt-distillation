@@ -274,7 +274,6 @@ def _local_inference(llm, prompts, temperature, max_new_tokens, batch_size=8):
             temperature=temperature,
             do_sample=True,
             eos_token_id=terminators,
-            repetition_penalty=1.1,
         )
         for j, output_ids in enumerate(tokens):
             prompt_len = encoded["input_ids"].shape[1]
