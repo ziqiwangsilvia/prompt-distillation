@@ -145,8 +145,6 @@ def _aligned_kl(student_logits, teacher_logits, student_masks, teacher_masks,
             t_sel = [t_logits_i[j] for j in t_idx]
             s_logits_i = torch.stack(s_sel)
             t_logits_i = torch.stack(t_sel)
-            # Drop EOS row/col from alignment
-            align = align[:-1, :-1]
         else:
             align = build_alignment_weights(student_tokenizer, teacher_tokenizer, align_text)
             # Drop EOS from logits — token loss handles end tokens
@@ -160,6 +158,14 @@ def _aligned_kl(student_logits, teacher_logits, student_masks, teacher_masks,
         # Align in probability space
         t_probs = F.softmax(t_logits_i / temperature, dim=-1)
         align = align.to(device=t_probs.device, dtype=t_probs.dtype)
+        if align.shape[1] != t_probs.shape[0]:
+            print(f"ALIGN MISMATCH: align={align.shape}, t_probs={t_probs.shape}, s_logits={s_logits_i.shape}", flush=True)
+            print(f"  is_tool={is_tool}, align_text={repr(align_text[:100])}", flush=True)
+            print(f"  teacher_answer={repr(teacher_answers[i][:100])}", flush=True)
+            if student_answer_texts:
+                print(f"  student_text={repr(student_answer_texts[i][:100])}", flush=True)
+            if teacher_answer_texts:
+                print(f"  teacher_text={repr(teacher_answer_texts[i][:100])}", flush=True)
         aligned_probs = align @ t_probs
         t_lp = aligned_probs.clamp(min=1e-8).log()
 
