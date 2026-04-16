@@ -53,6 +53,7 @@ print(f'PARTITION_TYPE=\"{_pt if _pt is not None else \"\"}\"')
 # GPU
 print(f'VLLM_GPU=\"{g.get(\"vllm\", \"0\")}\"')
 print(f'TRAIN_GPU=\"{g.get(\"train\", \"0\")}\"')
+print(f'TEACHER_GPU=\"{g.get(\"teacher\", \"0,1\")}\"')
 print(f'VLLM_HOST=\"{g.get(\"vllm_host\", \"localhost\")}\"')
 # Questions
 print(f'TOOL_BATCHES=\"{q.get(\"tool_batches\", 10)}\"')
@@ -271,6 +272,7 @@ else
         --use_wandb "${USE_WANDB}"
         --base "${STUDENT_BASE}"
         --teacher "${TEACHER_BASE}"
+        --teacher_gpus "${TEACHER_GPU}"
         --dataset_family "${DATASET_FAMILY}"
         --dataset "${DATASET}"
         --variant "${VARIANT}"

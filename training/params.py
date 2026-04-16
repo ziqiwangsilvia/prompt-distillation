@@ -36,6 +36,7 @@ class StudentArgs:
 @dataclass
 class TeacherArgs:
     teacher: str = "qwen2.5-7b-instruct"
+    teacher_gpus: str = "0,1"
     train_temperature: float = 2.0
     token_loss_weight: float = 0.0
     logit_loss_weight: float = 1.0

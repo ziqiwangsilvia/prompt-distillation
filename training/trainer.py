@@ -137,15 +137,19 @@ class Trainer:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
-                # Load teacher sharded across GPUs (frozen, inference only)
-                self.log("Loading teacher model with device_map='auto'...")
-                teacher = self.teacher_llm.load_model(training=False)
-                teacher.eval()
-                self.log("Teacher loaded and auto-sharded across devices")
+                # Only main process loads teacher; logits broadcast to other ranks
+                if accelerator.is_main_process:
+                    teacher_gpu_ids = [int(g) for g in hp.teacher_gpus.split(",")]
+                    max_memory = {g: "140GiB" for g in teacher_gpu_ids}
+                    self.log(f"Loading teacher on GPUs {teacher_gpu_ids}...")
+                    teacher = self.teacher_llm.load_model(training=False, device_map="auto", max_memory=max_memory)
+                    teacher.eval()
+                    self.log("Teacher loaded")
+                else:
+                    teacher = None
 
                 # Projection for cross-family distillation (different vocab sizes)
-                teacher_cfg = teacher.module.config if hasattr(teacher, 'module') else teacher.config
-                teacher_vocab = teacher_cfg.vocab_size
+                teacher_vocab = self.teacher_tokenizer.vocab_size
                 student_vocab = student.config.vocab_size
                 if teacher_vocab != student_vocab:
                     self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")
@@ -280,6 +284,7 @@ class Trainer:
             student_tokenizer=self.base_llm.tokenizer,
             teacher_tokenizer=self.teacher_tokenizer,
             use_tool_token=self.hp.use_tool_token,
+            accelerator=self.accelerator,
         )
 
     # ── Validation ─────────────────────────────────────────

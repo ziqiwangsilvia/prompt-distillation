@@ -45,11 +45,12 @@ def compute_logit_loss(
     student_tokenizer=None,
     teacher_tokenizer=None,
     use_tool_token: bool = False,
+    accelerator=None,
 ) -> torch.Tensor:
     student_inputs, student_masks, batch_size, seq_length = _get_student_masks(batch, closed_book)
     teacher, teacher_context, is_self = _resolve_teacher(student, teacher)
 
-    teacher_logits, teacher_masks = _forward_teacher(teacher, teacher_context, batch)
+    teacher_logits, teacher_masks = _forward_teacher(teacher, teacher_context, batch, accelerator=accelerator)
     if is_self:
         student.train()
 
@@ -96,16 +97,30 @@ def _resolve_teacher(student, teacher):
     return teacher, nullcontext(), False
 
 
-def _forward_teacher(teacher, teacher_context, batch):
-    with torch.no_grad(), teacher_context:
-        teacher.eval()
-        inputs = batch['teacher_seqs'][..., :-1]
-        masks = batch['teacher_masks'][..., 1:]
-        teacher_device = next(teacher.parameters()).device
-        output = teacher.forward(inputs.to(teacher_device))
-        # DeepSpeed inference engine may return a tuple instead of an object with .logits
-        logits = output.logits if hasattr(output, 'logits') else output[0]
-        logits = logits.detach()
+def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
+    inputs = batch['teacher_seqs'][..., :-1]
+    masks = batch['teacher_masks'][..., 1:]
+
+    if teacher is not None:
+        with torch.no_grad(), teacher_context:
+            teacher.eval()
+            teacher_device = next(teacher.parameters()).device
+            output = teacher.forward(inputs.to(teacher_device))
+            logits = output.logits if hasattr(output, 'logits') else output[0]
+            logits = logits.detach().to(inputs.device)
+
+    if accelerator is not None and accelerator.num_processes > 1:
+        import torch.distributed as dist
+        if teacher is None:
+            # Receive shape first, then logits
+            shape_tensor = torch.zeros(3, dtype=torch.long, device=inputs.device)
+            dist.broadcast(shape_tensor, src=0)
+            logits = torch.zeros(*shape_tensor.tolist(), dtype=torch.bfloat16, device=inputs.device)
+        else:
+            shape_tensor = torch.tensor(logits.shape, dtype=torch.long, device=inputs.device)
+            dist.broadcast(shape_tensor, src=0)
+        dist.broadcast(logits, src=0)
+
     return logits, masks
 
 

@@ -25,7 +25,8 @@ dataset:
 
 gpu:
   vllm: "0,1"
-  train: "0,1"
+  train: "0,1,2,3"
+  teacher: "0,1"
   vllm_host: localhost
 
 questions:

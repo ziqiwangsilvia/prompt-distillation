@@ -130,18 +130,22 @@ class LLM:
         return terminators
 
     def load_model(
-        self, training: bool = False, deepspeed: bool = False, device_map=None
+        self, training: bool = False, deepspeed: bool = False, device_map=None, max_memory=None
     ):
         torch_dtype = torch.bfloat16
         if device_map is None:
             device_map = None if training else "auto"
 
         t0 = time.perf_counter()
-        base_model = AutoModelForCausalLM.from_pretrained(
-            self.model_path,
+        kwargs = dict(
             device_map=device_map if not deepspeed else None,
             torch_dtype=torch_dtype,
             trust_remote_code=True,
+        )
+        if max_memory is not None:
+            kwargs["max_memory"] = max_memory
+        base_model = AutoModelForCausalLM.from_pretrained(
+            self.model_path, **kwargs
         )
         print(f"Time to load the model: {time.perf_counter() - t0:.02f} sec", flush=True)
 
