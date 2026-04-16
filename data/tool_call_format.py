@@ -88,14 +88,14 @@ def to_native_format(content: str, model_family: str) -> str:
 
 
 def normalize_tool_call(content: str) -> str:
-    """Normalize a tool call to common form for alignment: just name + args as sorted JSON.
+    """Normalize a tool call to common form for alignment: just name + args as JSON.
     Non-tool-call text is returned unchanged."""
     if not content.lstrip().startswith('{"name"'):
         return content
     try:
         parsed = json.loads(content)
         args = parsed.get("parameters", parsed.get("arguments", {}))
-        return json.dumps({"name": parsed["name"], "arguments": args}, sort_keys=True)
+        return json.dumps({"name": parsed["name"], "arguments": args})
     except (json.JSONDecodeError, KeyError):
         return content
 

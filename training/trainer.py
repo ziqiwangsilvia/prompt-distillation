@@ -25,6 +25,7 @@ from training.projection import VocabProjection
 from training.loss import compute_token_loss, compute_logit_loss
 from training.utils import (
     generate_answers,
+    extract_primitive_config,
     save_with_base_model_config,
     save_with_deepspeed,
     print_token_tensor,
@@ -354,6 +355,11 @@ class Trainer:
             save_with_deepspeed(self.student, self.accelerator, self.base_llm, path)
         else:
             save_with_base_model_config(self.student, self.base_llm, path)
+        # Save training config
+        import json
+        config = extract_primitive_config(vars(self.hp) if hasattr(self.hp, '__dict__') else self.hp)
+        with open(Path(path) / "training_config.json", "w") as f:
+            json.dump(config, f, indent=2)
 
     # ── Helpers ────────────────────────────────────────────
 

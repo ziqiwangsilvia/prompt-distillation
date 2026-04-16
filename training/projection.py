@@ -75,18 +75,23 @@ def build_shared_alignment(student_tokenizer, teacher_tokenizer,
     t_spans = t_enc["offset_mapping"]
 
     # Find tokens that overlap shared content (majority of token chars are shared)
-    def _shared_indices(spans, shared_chars):
+    _SKIP = {"parameters", "arguments", "}}\n", "}}"}
+
+    def _shared_indices(spans, shared_chars, text):
         indices = []
         for i, (start, end) in enumerate(spans):
             if end <= start:
+                continue
+            token_text = text[start:end]
+            if token_text in _SKIP or token_text.strip().strip('"') in _SKIP:
                 continue
             n_shared = sum(1 for c in range(start, end) if c in shared_chars)
             if n_shared > (end - start) / 2:
                 indices.append(i)
         return indices
 
-    s_indices = _shared_indices(s_spans, s_shared_chars)
-    t_indices = _shared_indices(t_spans, t_shared_chars)
+    s_indices = _shared_indices(s_spans, s_shared_chars, student_text)
+    t_indices = _shared_indices(t_spans, t_shared_chars, teacher_text)
 
     # Map native char positions to shared_text char positions for alignment
     # Build reverse map: native char -> shared char
@@ -104,7 +109,7 @@ def build_shared_alignment(student_tokenizer, teacher_tokenizer,
     # using shared_text character space
     n_s = len(s_indices)
     n_t = len(t_indices)
-    weights = torch.zeros(n_s + 1, n_t + 1)  # +1 for EOS
+    weights = torch.zeros(n_s, n_t)
 
     for wi, si in enumerate(s_indices):
         s_start, s_end = s_spans[si]
@@ -129,7 +134,4 @@ def build_shared_alignment(student_tokenizer, teacher_tokenizer,
         if row_sum > 0:
             weights[wi] /= row_sum
 
-    weights[-1, -1] = 1.0  # EOS -> EOS
-
-    # Add EOS index (last position in masked logits)
     return weights, s_indices, t_indices

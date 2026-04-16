@@ -1,7 +1,7 @@
 # Pipeline configuration
 
 project:
-  run_name: test_json
+  run_name: test_mvp_with_tool
   group_name: null
   train_only: true
   use_wandb: false
@@ -17,8 +17,8 @@ dataset:
   name: tool_calling
   variant: default
   datapath: output/teacher_answers
-  custom_train_data: ""
-  custom_val_data: ""
+  custom_train_data: "/fsx/shared/processed-data/llms/distillation/mvp/train.json"
+  custom_val_data: "/fsx/shared/processed-data/llms/distillation/mvp/val.json"
   distractor_dataset: ""
   partition_idx: null
   partition_type: null
