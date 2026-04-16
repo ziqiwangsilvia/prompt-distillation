@@ -77,6 +77,7 @@ print(f'LORA_R=\"{t.get(\"lora_r\", 1024)}\"')
 print(f'MIXED_PRECISION=\"{t.get(\"mixed_precision\", \"bf16\")}\"')
 print(f'CLOSED_BOOK=\"{t.get(\"closed_book\", True)}\"')
 print(f'USE_TOOL_TOKEN=\"{t.get(\"use_tool_token\", False)}\"')
+print(f'TEST_MODE=\"{t.get(\"test_mode\", False)}\"')
 print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
 print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
 print(f'TRAIN_TEMPERATURE=\"{t.get(\"train_temperature\", 2.0)}\"')
@@ -98,8 +99,7 @@ print(f'CHECKPOINT_INTERVAL=\"{t.get(\"checkpoint_interval\", 0)}\"')
 print(f'CHECKPOINT_INTERVAL_SECONDS=\"{t.get(\"checkpoint_interval_seconds\", 0)}\"')
 print(f'MAX_LENGTH=\"{t.get(\"max_length\", 0)}\"')
 print(f'MAX_TOTAL_LENGTH=\"{t.get(\"max_total_length\", 0)}\"')
-print(f'DEEPSPEED_PATH=\"{t.get(\"deepspeed_path\", \"\")}\"')
-print(f'DEEPSPEED_PATH_TEACHER=\"{t.get(\"deepspeed_path_teacher\", \"\")}\"')
+print(f'ACCELERATE_CONFIG=\"{t.get(\"accelerate_config\", \"\")}\"')
 import json as _json
 _topics = q.get('topics', [])
 if _topics:
@@ -288,6 +288,7 @@ else
         --mixed_precision "${MIXED_PRECISION}"
         --closed_book "${CLOSED_BOOK}"
         --use_tool_token "${USE_TOOL_TOKEN}"
+        --test_mode "${TEST_MODE}"
         --token_loss_weight "${TOKEN_LOSS_WEIGHT}"
         --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
         --train_temperature "${TRAIN_TEMPERATURE}"
@@ -335,16 +336,12 @@ else
     if [ -n "${PARTITION_TYPE}" ]; then
         TRAIN_ARGS+=(--partition_type "${PARTITION_TYPE}")
     fi
-    if [ -n "${DEEPSPEED_PATH}" ]; then
-        TRAIN_ARGS+=(--deepspeed_path "${DEEPSPEED_PATH}")
-    fi
-    if [ -n "${DEEPSPEED_PATH_TEACHER}" ]; then
-        TRAIN_ARGS+=(--deepspeed_path_teacher "${DEEPSPEED_PATH_TEACHER}")
-    fi
     if [ -n "${TOOLS_SCHEMA_PATH}" ]; then
         TRAIN_ARGS+=(--tools_schema_path "${TOOLS_SCHEMA_PATH}")
     fi
-    CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" python3 training/train.py "${TRAIN_ARGS[@]}"
+    CUDA_VISIBLE_DEVICES="${TRAIN_GPU}" accelerate launch \
+        --config_file "${ACCELERATE_CONFIG}" \
+        training/train.py "${TRAIN_ARGS[@]}"
 fi
 
 echo "=== Pipeline complete ==="

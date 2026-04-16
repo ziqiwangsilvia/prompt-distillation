@@ -32,18 +32,15 @@ def main(args: AllArgs):
     base_llm = LLM(args.base, opening_message=args.opening_message)
 
     # Create teacher LLM for tokenization if using a separate teacher model
+    # NOTE: teacher model loading is deferred to Trainer._init_models() so that
+    # accelerator is initialized first and DeepSpeed can shard the teacher properly.
     teacher_llm = None
-    teacher_model = None
     if args.logit_loss_weight and args.teacher not in {"student", "student_base"}:
         from models.configs import MODEL_CONFIGS
         from models.messages import Message, Role
         teacher_config = MODEL_CONFIGS[args.teacher]
         teacher_opening = Message(Role.SYSTEM, teacher_config.system_message)
         teacher_llm = LLM(args.teacher, opening_message=teacher_opening)
-        # Load teacher to CPU (no device_map to avoid accelerate conflicts)
-        import torch
-        teacher_model = teacher_llm.load_model(training=True)
-        teacher_model = teacher_model.to(torch.bfloat16)
     # Build data file list
     if args.custom_train_data:
         train_file = args.custom_train_data
@@ -84,7 +81,7 @@ def main(args: AllArgs):
             tools = json.load(f)
         print(f"Loaded {len(tools)} tool definitions from {args.tools_schema_path}", flush=True)
 
-    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm, teacher_model=teacher_model, tools=tools)
+    trainer = Trainer(base_llm=base_llm, data=data, hp=args, teacher_llm=teacher_llm, tools=tools)
     trainer.train()
 
 

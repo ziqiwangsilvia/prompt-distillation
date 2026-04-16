@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 import torch
-from accelerate import Accelerator, DeepSpeedPlugin
+from accelerate import Accelerator
 from accelerate.utils import ProjectConfiguration
 from peft import get_peft_model
 from transformers import PreTrainedModel
@@ -27,16 +27,15 @@ from training.utils import (
     generate_answers,
     extract_primitive_config,
     save_with_base_model_config,
-    save_with_deepspeed,
     print_token_tensor,
 )
 
 
 class Trainer:
-    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None, teacher_model=None, tools: list = None):
+    def __init__(self, base_llm: LLM, data: Tuple[List[str], List[str]], hp: SimpleNamespace, teacher_llm: LLM = None, tools: list = None):
         self.base_llm = base_llm
+        self.teacher_llm = teacher_llm
         self.teacher_tokenizer = teacher_llm.tokenizer if teacher_llm else None
-        self.teacher_model = teacher_model
         self.hp = hp
         self.accelerator = self._init_run()
 
@@ -81,24 +80,13 @@ class Trainer:
 
         project_cfg = ProjectConfiguration(automatic_checkpoint_naming=True)
 
-        if hp.deepspeed_path and hp.teacher in {"student", "student_base"}:
-            ds_plugin = _get_ds_plugin(hp.deepspeed_path)
-        elif hp.deepspeed_path:
-            ds_plugin = {
-                "student": DeepSpeedPlugin(hf_ds_config=hp.deepspeed_path),
-                "teacher": DeepSpeedPlugin(hf_ds_config=hp.deepspeed_path_teacher),
-            }
-        else:
-            ds_plugin = None
-
         accelerator = Accelerator(
             mixed_precision=hp.mixed_precision,
             project_dir=hp.run_project_dir,
             project_config=project_cfg,
-            deepspeed_plugin=ds_plugin,
         )
 
-        hp.devices = accelerator.state.num_processes if hp.deepspeed_path else 1
+        hp.devices = accelerator.state.num_processes
         hp.verbose = accelerator.is_main_process
 
         sys.stdout = DualOutput(hp.run_project_dir / f"output_{accelerator.process_index}.log")
@@ -126,12 +114,12 @@ class Trainer:
         accelerator = self.accelerator
 
         self.log("Loading student model")
-        student = base_llm.load_model(training=True, deepspeed=bool(hp.deepspeed_path))
+        student = base_llm.load_model(training=True)
         self.log(f"Trainable params: {num_parameters(student, True):,},  Frozen params: {num_parameters(student, False):,}")
         self.log("Preparing student LoRA")
 
         student = get_peft_model(student, hp.peft_config)
-        if hp.mixed_precision == "bf16" and not hp.deepspeed_path:
+        if hp.mixed_precision == "bf16":
             student = student.to(torch.bfloat16)
 
         self.log("PEFT student built.")
@@ -149,38 +137,15 @@ class Trainer:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
-                teacher = self.teacher_model
-                n_gpus = torch.cuda.device_count()
-                self.log(f"CUDA devices: {n_gpus}, accelerator device: {accelerator.device}")
-                if n_gpus > 1:
-                    # Build explicit device map
-                    layers = teacher.model.layers
-                    mid = len(layers) // 2
-                    device_map = {"model.embed_tokens": 0, "model.norm": 1, "lm_head": 1}
-                    if hasattr(teacher.model, "rotary_emb"):
-                        device_map["model.rotary_emb"] = 0
-                    for i in range(len(layers)):
-                        device_map[f"model.layers.{i}"] = 0 if i < mid else 1
-                    from accelerate import dispatch_model
-                    import subprocess, threading
-                    stop_mon = threading.Event()
-                    def _gpu_mon():
-                        while not stop_mon.is_set():
-                            out = subprocess.check_output(["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader"], text=True).strip()
-                            print(f"  [GPU] {out.replace(chr(10), ' | ')}", flush=True)
-                            stop_mon.wait(5)
-                    mon = threading.Thread(target=_gpu_mon, daemon=True)
-                    mon.start()
-                    dispatch_model(teacher, device_map=device_map)
-                    stop_mon.set()
-                    self.log(f"Teacher split: {mid}/{len(layers)-mid} layers on cuda:0/cuda:1")
-                else:
-                    teacher.to(accelerator.device)
-                    self.log(f"Teacher on {accelerator.device}")
+                # Load teacher sharded across GPUs (frozen, inference only)
+                self.log("Loading teacher model with device_map='auto'...")
+                teacher = self.teacher_llm.load_model(training=False)
                 teacher.eval()
+                self.log("Teacher loaded and auto-sharded across devices")
 
                 # Projection for cross-family distillation (different vocab sizes)
-                teacher_vocab = teacher.config.vocab_size
+                teacher_cfg = teacher.module.config if hasattr(teacher, 'module') else teacher.config
+                teacher_vocab = teacher_cfg.vocab_size
                 student_vocab = student.config.vocab_size
                 if teacher_vocab != student_vocab:
                     self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")
@@ -351,10 +316,7 @@ class Trainer:
 
     def save(self, path=None):
         path = path or self.hp.run_project_dir
-        if self.hp.deepspeed_path:
-            save_with_deepspeed(self.student, self.accelerator, self.base_llm, path)
-        else:
-            save_with_base_model_config(self.student, self.base_llm, path)
+        save_with_base_model_config(self.student, self.base_llm, path)
         # Save training config
         import json
         config = extract_primitive_config(vars(self.hp) if hasattr(self.hp, '__dict__') else self.hp)
@@ -403,11 +365,6 @@ class Trainer:
 
 
 # ── Module-level helpers ──────────────────────────────────
-
-def _get_ds_plugin(ds_config_path: str) -> DeepSpeedPlugin:
-    with open(ds_config_path, "r", encoding="utf-8") as f:
-        return DeepSpeedPlugin(hf_ds_config=json.load(f))
-
 
 def _model_is_bf16(model: PreTrainedModel) -> bool:
     return all(p.dtype == torch.bfloat16 for p in model.parameters())

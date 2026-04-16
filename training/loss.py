@@ -102,7 +102,10 @@ def _forward_teacher(teacher, teacher_context, batch):
         inputs = batch['teacher_seqs'][..., :-1]
         masks = batch['teacher_masks'][..., 1:]
         teacher_device = next(teacher.parameters()).device
-        logits = teacher.forward(inputs.to(teacher_device)).logits.detach()
+        output = teacher.forward(inputs.to(teacher_device))
+        # DeepSpeed inference engine may return a tuple instead of an object with .logits
+        logits = output.logits if hasattr(output, 'logits') else output[0]
+        logits = logits.detach()
     return logits, masks
 
 

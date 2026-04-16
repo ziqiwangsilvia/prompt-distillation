@@ -1,7 +1,7 @@
 # Pipeline configuration
 
 project:
-  run_name: test_mvp_with_tool
+  run_name: test_ddp
   group_name: null
   train_only: true
   use_wandb: false
@@ -63,6 +63,7 @@ training:
   mixed_precision: bf16
   closed_book: true
   use_tool_token: true
+  test_mode: true
   token_loss_weight: 1.0
   logit_loss_weight: 0.5
   train_temperature: 2.0
@@ -83,5 +84,4 @@ training:
   checkpoint_interval_seconds: 0
   max_length: 0
   max_total_length: 0
-  deepspeed_path: ""
-  deepspeed_path_teacher: ""
+  accelerate_config: config/accelerate_ddp_2gpu.yaml

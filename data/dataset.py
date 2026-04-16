@@ -48,6 +48,7 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
         teacher_llm=None,
         tools: list = None,
         use_tool_token: bool = False,
+        max_samples: int = 0,
     ):
         assert isinstance(filenames, list), "filenames should be a list"
         self.samples: List[Dict[str, Any]] = []
@@ -65,6 +66,8 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
             exercises = read_exercises(filepath)
             training_pairs = 0
             for ex_i, exercise in enumerate(exercises):
+                if max_samples and len(self.samples) >= max_samples:
+                    break
                 question = extract_question(exercise)
                 material, _ = extract_material_and_question(exercise)
                 student_closed_tokens, student_open_tokens, teacher_tokens = tokenize_teacher_student(material, question, llm, teacher_llm=teacher_llm, tools=tools, student_tools=tools if use_tool_token else None)
@@ -168,6 +171,7 @@ class TeacherDataset(torch.utils.data.Dataset):
         distractor_dataset: str = "",
         tools: list = None,
         use_tool_token: bool = False,
+        max_samples: int = 0,
     ):
         assert isinstance(filenames, list), "filenames should be a list"
         self.samples: List[Dict[str, Any]] = []
@@ -185,6 +189,8 @@ class TeacherDataset(torch.utils.data.Dataset):
             exercises = read_exercises(filepath)
 
             for ex_i, exercise in enumerate(exercises):
+                if max_samples and len(self.samples) >= max_samples:
+                    break
                 if len(exercise.answer_choices) != 1:
                     raise NotImplementedError("Multiple choices per answer are not currently supported in token loss training")
 
