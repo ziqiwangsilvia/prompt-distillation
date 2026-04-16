@@ -150,7 +150,7 @@ class Trainer:
 
                 # Projection for cross-family distillation (different vocab sizes)
                 teacher_vocab = self.teacher_tokenizer.vocab_size
-                student_vocab = student.config.vocab_size
+                student_vocab = student.module.config.vocab_size if hasattr(student, 'module') else student.config.vocab_size
                 if teacher_vocab != student_vocab:
                     self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")
                     projection = VocabProjection(teacher_vocab, student_vocab)
