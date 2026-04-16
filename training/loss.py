@@ -139,17 +139,16 @@ def _aligned_kl(student_logits, teacher_logits, student_masks, teacher_masks,
             t_text = teacher_answer_texts[i]
             align, s_idx, t_idx = build_shared_alignment(
                 student_tokenizer, teacher_tokenizer, s_text, t_text, align_text)
-
-            # Select only shared-content logits (no EOS — token loss handles end tokens)
+            # +1 to skip <|python_tag|> prefix token
             s_sel = [s_logits_i[j + 1] for j in s_idx]
             t_sel = [t_logits_i[j] for j in t_idx]
-            s_logits_i = torch.stack(s_sel)
-            t_logits_i = torch.stack(t_sel)
         else:
-            align = build_alignment_weights(student_tokenizer, teacher_tokenizer, align_text)
-            # Drop EOS from logits — token loss handles end tokens
-            s_logits_i = s_logits_i[:-1]
-            t_logits_i = t_logits_i[:-1]
+            align, s_idx, t_idx = build_alignment_weights(student_tokenizer, teacher_tokenizer, align_text)
+            s_sel = [s_logits_i[j] for j in s_idx]
+            t_sel = [t_logits_i[j] for j in t_idx]
+
+        s_logits_i = torch.stack(s_sel)
+        t_logits_i = torch.stack(t_sel)
 
         # Project vocab before alignment if needed
         if projection is not None:

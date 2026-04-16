@@ -16,12 +16,11 @@ class VocabProjection(nn.Module):
         return self.proj(teacher_logits)
 
 
-def build_alignment_weights(student_tokenizer, teacher_tokenizer, text: str) -> torch.Tensor:
-    """Build (student_len, teacher_len) alignment matrix from character offsets.
+def build_alignment_weights(student_tokenizer, teacher_tokenizer, text: str):
+    """Build alignment matrix from character offsets, excluding EOS.
 
-    Each row is a distribution over teacher tokens that overlap the student
-    token's span. Weights are proportional to character overlap.
-    EOS is excluded — end tokens are learned via token loss only.
+    Returns (alignment_matrix, student_indices, teacher_indices) — same interface
+    as build_shared_alignment for consistent handling in the loss function.
     """
     s_enc = student_tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
     t_enc = teacher_tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
@@ -37,7 +36,7 @@ def build_alignment_weights(student_tokenizer, teacher_tokenizer, text: str) -> 
         row_sum = weights[i].sum()
         if row_sum > 0:
             weights[i] /= row_sum
-    return weights
+    return weights, list(range(len(s_spans))), list(range(len(t_spans)))
 
 
 def build_shared_alignment(student_tokenizer, teacher_tokenizer,
