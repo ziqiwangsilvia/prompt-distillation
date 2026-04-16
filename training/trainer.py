@@ -137,7 +137,7 @@ class Trainer:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
-                # Only main process loads teacher; logits broadcast to other ranks
+                # Only main process loads teacher
                 if accelerator.is_main_process:
                     teacher_gpu_ids = [int(g) for g in hp.teacher_gpus.split(",")]
                     max_memory = {g: "140GiB" for g in teacher_gpu_ids}
@@ -149,7 +149,15 @@ class Trainer:
                     teacher = None
 
                 # Projection for cross-family distillation (different vocab sizes)
-                teacher_vocab = self.teacher_tokenizer.vocab_size
+                import torch.distributed as dist
+                if teacher is not None:
+                    teacher_cfg = teacher.module.config if hasattr(teacher, 'module') else teacher.config
+                    tv = torch.tensor([teacher_cfg.vocab_size], device=accelerator.device)
+                else:
+                    tv = torch.tensor([0], device=accelerator.device)
+                if accelerator.num_processes > 1:
+                    dist.broadcast(tv, src=0)
+                teacher_vocab = tv.item()
                 student_vocab = student.module.config.vocab_size if hasattr(student, 'module') else student.config.vocab_size
                 if teacher_vocab != student_vocab:
                     self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")

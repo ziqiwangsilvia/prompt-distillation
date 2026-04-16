@@ -100,26 +100,67 @@ def _resolve_teacher(student, teacher):
 def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
     inputs = batch['teacher_seqs'][..., :-1]
     masks = batch['teacher_masks'][..., 1:]
+    use_distributed = accelerator is not None and accelerator.num_processes > 1
 
-    if teacher is not None:
+    if use_distributed:
+        import torch.distributed as dist
+        device = inputs.device
+
+        # All ranks send their seq_len to rank 0
+        local_seq_len = torch.tensor([inputs.shape[1]], device=device)
+        all_seq_lens = [torch.zeros(1, dtype=torch.long, device=device) for _ in range(accelerator.num_processes)]
+        dist.all_gather(all_seq_lens, local_seq_len)
+        max_seq = max(s.item() for s in all_seq_lens)
+
+        # Pad and gather inputs on rank 0
+        padded = torch.zeros(inputs.shape[0], max_seq, dtype=inputs.dtype, device=device)
+        padded[:, :inputs.shape[1]] = inputs
+        gathered = [torch.zeros_like(padded) for _ in range(accelerator.num_processes)]
+        dist.all_gather(gathered, padded)
+
+        # Rank 0 runs teacher forward on each rank's inputs
+        if teacher is not None:
+            all_logits = []
+            with torch.no_grad(), teacher_context:
+                teacher.eval()
+                teacher_device = next(teacher.parameters()).device
+                for rank_input, seq_len in zip(gathered, all_seq_lens):
+                    sl = seq_len.item()
+                    out = teacher.forward(rank_input[:, :sl].to(teacher_device))
+                    lgt = (out.logits if hasattr(out, 'logits') else out[0]).detach()
+                    all_logits.append(lgt.to(device))
+            vocab_size = all_logits[0].shape[-1]
+        else:
+            all_logits = None
+            vocab_size = 0
+
+        # Broadcast vocab size so non-main ranks can allocate
+        vs = torch.tensor([vocab_size], device=device)
+        dist.broadcast(vs, src=0)
+        vocab_size = vs.item()
+
+        # Scatter: rank 0 sends each rank its logits
+        my_rank = accelerator.process_index
+        my_seq_len = inputs.shape[1]
+        my_logits = torch.zeros(inputs.shape[0], my_seq_len, vocab_size, dtype=torch.bfloat16, device=device)
+
+        for r in range(accelerator.num_processes):
+            sl = all_seq_lens[r].item()
+            buf = torch.zeros(inputs.shape[0], sl, vocab_size, dtype=torch.bfloat16, device=device)
+            if all_logits is not None:
+                buf.copy_(all_logits[r])
+            dist.broadcast(buf, src=0)
+            if r == my_rank:
+                my_logits = buf
+
+        logits = my_logits
+    else:
         with torch.no_grad(), teacher_context:
             teacher.eval()
             teacher_device = next(teacher.parameters()).device
             output = teacher.forward(inputs.to(teacher_device))
             logits = output.logits if hasattr(output, 'logits') else output[0]
             logits = logits.detach().to(inputs.device)
-
-    if accelerator is not None and accelerator.num_processes > 1:
-        import torch.distributed as dist
-        if teacher is None:
-            # Receive shape first, then logits
-            shape_tensor = torch.zeros(3, dtype=torch.long, device=inputs.device)
-            dist.broadcast(shape_tensor, src=0)
-            logits = torch.zeros(*shape_tensor.tolist(), dtype=torch.bfloat16, device=inputs.device)
-        else:
-            shape_tensor = torch.tensor(logits.shape, dtype=torch.long, device=inputs.device)
-            dist.broadcast(shape_tensor, src=0)
-        dist.broadcast(logits, src=0)
 
     return logits, masks
 
