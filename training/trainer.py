@@ -328,8 +328,11 @@ class Trainer:
     # ── Save ───────────────────────────────────────────────
 
     def save(self, path=None):
+        if not self.accelerator.is_main_process:
+            return
         path = path or self.hp.run_project_dir
-        save_with_base_model_config(self.student, self.base_llm, path)
+        model = self.student.module if hasattr(self.student, 'module') else self.student
+        save_with_base_model_config(model, self.base_llm, path)
         # Save training config
         import json
         config = extract_primitive_config(vars(self.hp) if hasattr(self.hp, '__dict__') else self.hp)
