@@ -42,7 +42,9 @@ def init_projection_from_tokenizers(projection: VocabProjection, teacher_tokeniz
         torch.stack([s_ids_t, t_ids_t]),
         values,
         size=(student_vs, teacher_vs),
-    ).to_dense()
+    )
+    if torch.cuda.is_available():
+        M = M.cuda()
 
     # Truncated SVD: M ≈ U[:, :k] @ S[:k] @ V[:k, :]
     U, S, V = torch.svd_lowrank(M, q=bottleneck)
