@@ -56,7 +56,7 @@ training:
   mixed_precision: bf16
   closed_book: true
   use_tool_token: true
-  test_mode: false
+  test_mode: true
   token_loss_weight: 1.0
   logit_loss_weight: 0.2
   train_temperature: 2
