@@ -16,6 +16,46 @@ class VocabProjection(nn.Module):
         return self.proj(teacher_logits)
 
 
+def init_projection_from_tokenizers(projection: VocabProjection, teacher_tokenizer, student_tokenizer):
+    """Initialize projection so shared tokens map correctly via SVD of the sparse mapping."""
+    t_vocab = {teacher_tokenizer.decode([i]): i for i in range(teacher_tokenizer.vocab_size)}
+    s_vocab = {student_tokenizer.decode([i]): i for i in range(student_tokenizer.vocab_size)}
+
+    # Build sparse mapping matrix M[s, t] = 1 where tokens match by string
+    t_ids, s_ids = [], []
+    for tok_str, s_id in s_vocab.items():
+        if tok_str in t_vocab:
+            t_ids.append(t_vocab[tok_str])
+            s_ids.append(s_id)
+
+    bottleneck = projection.proj[0].out_features
+    teacher_vs = projection.proj[0].in_features
+    student_vs = projection.proj[1].out_features
+
+    # Build dense mapping for shared tokens: M = proj[1].weight @ proj[0].weight
+    # We want M[s_id, t_id] = 1 for shared tokens. Factor via truncated SVD.
+    # Construct M as sparse then do randomized SVD for the bottleneck.
+    t_ids_t = torch.tensor(t_ids, dtype=torch.long)
+    s_ids_t = torch.tensor(s_ids, dtype=torch.long)
+    values = torch.ones(len(t_ids), dtype=torch.float32)
+    M = torch.sparse_coo_tensor(
+        torch.stack([s_ids_t, t_ids_t]),
+        values,
+        size=(student_vs, teacher_vs),
+    ).to_dense()
+
+    # Truncated SVD: M ≈ U[:, :k] @ S[:k] @ V[:k, :]
+    U, S, V = torch.svd_lowrank(M, q=bottleneck)
+    sqrt_S = S.sqrt()
+    # proj[0].weight: [bottleneck, teacher_vs] = diag(sqrt_S) @ V^T
+    # proj[1].weight: [student_vs, bottleneck] = U @ diag(sqrt_S)
+    with torch.no_grad():
+        projection.proj[0].weight.copy_((sqrt_S.unsqueeze(1) * V.T))
+        projection.proj[1].weight.copy_((U * sqrt_S.unsqueeze(0)))
+
+    return projection
+
+
 def build_alignment_weights(student_tokenizer, teacher_tokenizer, text: str):
     """Build alignment matrix from character offsets, excluding EOS.
 

@@ -41,6 +41,7 @@ class TeacherArgs:
     token_loss_weight: float = 0.0
     logit_loss_weight: float = 1.0
     reverse_kl: bool = False
+    projection_type: str = "tokenizer"  # "tokenizer" (SVD from shared tokens) or "bottleneck" (random init)
 
 
 @dataclass
