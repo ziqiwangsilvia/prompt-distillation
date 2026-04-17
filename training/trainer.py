@@ -160,8 +160,12 @@ class Trainer:
                 teacher_vocab = tv.item()
                 student_vocab = student.module.config.vocab_size if hasattr(student, 'module') else student.config.vocab_size
                 if teacher_vocab != student_vocab:
-                    self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection.")
+                    self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection ({hp.projection_type}).")
                     projection = VocabProjection(teacher_vocab, student_vocab)
+                    if hp.projection_type == "tokenizer" and accelerator.is_main_process:
+                        from training.projection import init_projection_from_tokenizers
+                        self.log("Initializing projection from shared tokens (SVD)...")
+                        init_projection_from_tokenizers(projection, self.teacher_llm.tokenizer, base_llm.tokenizer)
                     if hp.mixed_precision == "bf16":
                         projection = projection.to(torch.bfloat16)
                     projection = accelerator.prepare(projection)

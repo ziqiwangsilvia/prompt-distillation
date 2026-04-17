@@ -1,7 +1,7 @@
 # Pipeline configuration
 
 project:
-  run_name: test_ddp
+  run_name: test_single
   group_name: null
   train_only: true
   use_wandb: false
@@ -25,8 +25,8 @@ dataset:
 
 gpu:
   vllm: "0,1"
-  train: "0,1,2,3"
-  teacher: "2,3,4"
+  train: "0,1"
+  teacher: "0,1"
   vllm_host: localhost
 
 questions:
@@ -86,4 +86,4 @@ training:
   checkpoint_interval_seconds: 0
   max_length: 0
   max_total_length: 0
-  accelerate_config: config/accelerate_ddp_5gpu.yaml
+  accelerate_config: config/accelerate_single_gpu.yaml
