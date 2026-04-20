@@ -112,14 +112,11 @@ def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
         dist.all_gather(all_seq_lens, local_seq_len)
         max_seq = max(s.item() for s in all_seq_lens)
 
-        # Pad and gather inputs on rank 0 only
+        # Pad and gather inputs on rank 0
         padded = torch.zeros(inputs.shape[0], max_seq, dtype=inputs.dtype, device=device)
         padded[:, :inputs.shape[1]] = inputs
-        if accelerator.is_main_process:
-            gathered = [torch.zeros_like(padded) for _ in range(accelerator.num_processes)]
-        else:
-            gathered = None
-        dist.gather(padded, gathered, dst=0)
+        gathered = [torch.zeros_like(padded) for _ in range(accelerator.num_processes)]
+        dist.all_gather(gathered, padded)
 
         # Rank 0 runs teacher forward on each rank's inputs
         if teacher is not None:
@@ -131,7 +128,7 @@ def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
                     sl = seq_len.item()
                     out = teacher.forward(rank_input[:, :sl].to(teacher_device))
                     lgt = (out.logits if hasattr(out, 'logits') else out[0]).detach()
-                    all_logits.append(lgt)
+                    all_logits.append(lgt.to(device))
             vocab_size = all_logits[0].shape[-1]
         else:
             all_logits = None
@@ -142,22 +139,19 @@ def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
         dist.broadcast(vs, src=0)
         vocab_size = vs.item()
 
-        # Send each rank only its own logits
+        # Scatter: rank 0 sends each rank its logits
         my_rank = accelerator.process_index
         my_seq_len = inputs.shape[1]
         my_logits = torch.zeros(inputs.shape[0], my_seq_len, vocab_size, dtype=torch.bfloat16, device=device)
 
-        if accelerator.is_main_process:
-            for r in range(accelerator.num_processes):
-                sl = all_seq_lens[r].item()
-                buf = all_logits[r][:, :sl, :].to(dtype=torch.bfloat16, device=device)
-                if r == 0:
-                    my_logits = buf
-                else:
-                    dist.send(buf, dst=r)
-            del all_logits, gathered
-        else:
-            dist.recv(my_logits, src=0)
+        for r in range(accelerator.num_processes):
+            sl = all_seq_lens[r].item()
+            buf = torch.zeros(inputs.shape[0], sl, vocab_size, dtype=torch.bfloat16, device=device)
+            if all_logits is not None:
+                buf.copy_(all_logits[r])
+            dist.broadcast(buf, src=0)
+            if r == my_rank:
+                my_logits = buf
 
         logits = my_logits
     else:

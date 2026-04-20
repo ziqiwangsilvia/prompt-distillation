@@ -41,7 +41,8 @@ class TeacherArgs:
     token_loss_weight: float = 0.0
     logit_loss_weight: float = 1.0
     reverse_kl: bool = False
-    projection_type: str = "tokenizer"  # "tokenizer" (SVD from shared tokens) or "bottleneck" (random init)
+    vocab_mapping: str = "svd"  # "svd" (from shared tokens), "bottleneck" (random init), or "topk" (top-K revert, no learned params)
+    n_topk: int = 100  # number of top-K teacher tokens to use when vocab_mapping="topk"
 
 
 @dataclass

@@ -13,6 +13,17 @@ from curriculum.exercise_with_answers import ExerciseWithAnswers
 from training import IGNORE_INDEX
 from training.utils import tokenize_teacher_student, read_exercises, ensure_path_exists, extract_question, extract_material_and_question
 
+
+def _stratified_sample(exercises, n=7):
+    """Pick n tool-call and n NLP exercises based on ground truth."""
+    tool, nlp = [], []
+    for ex in exercises:
+        if ex.answer_choices and ex.answer_choices[0].content.lstrip().startswith('{"'):
+            tool.append(ex)
+        else:
+            nlp.append(ex)
+    return tool[:n] + nlp[:n]
+
 DISTRACTOR_PROB = 0.6
 
 
@@ -64,10 +75,10 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
             self.lesson_names.append(lesson_name)
             lesson_ix = len(self.lesson_names) - 1
             exercises = read_exercises(filepath)
+            if max_samples:
+                exercises = _stratified_sample(exercises, n=max_samples)
             training_pairs = 0
             for ex_i, exercise in enumerate(exercises):
-                if max_samples and len(self.samples) >= max_samples:
-                    break
                 question = extract_question(exercise)
                 material, _ = extract_material_and_question(exercise)
                 student_closed_tokens, student_open_tokens, teacher_tokens = tokenize_teacher_student(material, question, llm, teacher_llm=teacher_llm, tools=tools, student_tools=tools if use_tool_token else None)
@@ -187,10 +198,10 @@ class TeacherDataset(torch.utils.data.Dataset):
             lesson_ix = len(self.lesson_names) - 1
 
             exercises = read_exercises(filepath)
+            if max_samples:
+                exercises = _stratified_sample(exercises, n=max_samples)
 
             for ex_i, exercise in enumerate(exercises):
-                if max_samples and len(self.samples) >= max_samples:
-                    break
                 if len(exercise.answer_choices) != 1:
                     raise NotImplementedError("Multiple choices per answer are not currently supported in token loss training")
 

@@ -12,12 +12,12 @@ This repository contains the code necessary to reproduce the main results of our
 ├── training/          # Training loop, loss functions, projection, alignment
 │   ├── train.py       # Entry point for training
 │   ├── trainer.py     # Trainer class with multi-GPU teacher support
-│   ├── loss.py        # Token loss, logit loss (flat + aligned KL)
+│   ├── loss.py        # Token loss, logit loss (flat + aligned KL), distributed teacher forward
 │   ├── projection.py  # VocabProjection + character-span alignment
 │   ├── params.py      # All training hyperparameters
 │   └── utils.py       # Tokenization, generation, data loading helpers
 ├── evaluation/        # Evaluation and grading scripts
-├── config/            # Pipeline YAML config and DeepSpeed configs
+├── config/            # Pipeline YAML config, accelerate configs, and DeepSpeed configs
 ├── scripts/           # Pipeline runner and evaluation scripts
 ├── datasets/          # Evaluation datasets
 ├── context/           # System prompts and tool schemas
@@ -73,7 +73,7 @@ project:
 
 models:
   teacher: qwen2.5-72b-instruct
-  student: llama3-8b-instruct
+  student: llama3.1-8b-instruct
 
 dataset:
   datapath: output/teacher_answers   # Where generated data is saved/read
@@ -82,41 +82,43 @@ dataset:
 
 gpu:
   vllm: "0,1"              # GPUs for vLLM (auto tensor-parallel)
-  train: "0,1"             # GPUs for training
+  train: "0,1,2,3,4"       # All GPUs visible during training
+  teacher: "2,3,4"          # GPUs for teacher model (must not overlap with student DDP ranks)
+  vllm_host: localhost
 
 training:
   token_loss_weight: 1.0    # Cross-entropy on answer tokens
   logit_loss_weight: 0.5    # KL divergence from teacher
   closed_book: true         # Student sees question only (no material)
+  accelerate_config: config/accelerate_ddp_5gpu.yaml
   # ... see pipeline.yaml for all options
 ```
 
-## Usage Examples
+## Training Modes
 
-### Same-tokenizer distillation (Llama → Llama)
+### SFT only (no distillation)
 
-```bash
-# Launch vLLM server
-python3 -u -m vllm.entrypoints.openai.api_server \
-    --model meta-llama/Meta-Llama-3-8B-Instruct --dtype auto --api-key token-abc123
+Standard supervised fine-tuning on teacher-generated answers:
 
-# Generate data, then train
-bash scripts/run_pipeline.sh
-```
-
-### Cross-tokenizer distillation (Qwen → Llama)
-
-Set in `pipeline.yaml`:
 ```yaml
-models:
-  teacher: qwen2.5-72b-instruct
-  student: llama3-8b-instruct
+training:
+  token_loss_weight: 1.0
+  logit_loss_weight: 0.0
+  accelerate_config: config/accelerate_ddp_2gpu.yaml
 ```
 
-The pipeline automatically:
-- Detects vocab mismatch and creates a `VocabProjection` (bottleneck linear layer)
-- Uses character-span alignment for token-level KL
-- Splits the teacher across multiple GPUs via `dispatch_model`
+### Logit distillation
+
+KL divergence from teacher logits, optionally combined with SFT:
+
+```yaml
+training:
+  token_loss_weight: 1.0    # Set to 0.0 for logit-only
+  logit_loss_weight: 0.5
+  train_temperature: 2.0    # Temperature for KL softmax
+  reverse_kl: false          # Forward KL (default) or reverse KL
+  accelerate_config: config/accelerate_ddp_5gpu.yaml
+```
 
 ### Training only with custom data
 
@@ -126,14 +128,6 @@ project:
 dataset:
   custom_train_data: /path/to/train.json
   custom_val_data: /path/to/val.json
-```
-
-### SFT only (no distillation)
-
-```yaml
-training:
-  token_loss_weight: 1.0
-  logit_loss_weight: 0.0
 ```
 
 ## Cross-Tokenizer Distillation
@@ -153,15 +147,49 @@ The alignment weight for student token `"unhapp"` (0-6):
 
 The aligned teacher distribution at each student position is a weighted average of overlapping teacher token probabilities (in probability space, not logit space), then KL divergence is computed on the result.
 
-When vocab sizes differ, a learned bottleneck projection (`VocabProjection`) maps teacher logits to the student vocab space before alignment.
+When vocab sizes differ, a learned bottleneck projection (`VocabProjection`) maps teacher logits to the student vocab space before alignment. The projection is trained alongside the student LoRA.
+
+### Key functions
+
+- `build_alignment_weights()` — builds a sparse alignment matrix from character spans
+- `build_shared_alignment()` — alignment for tool-call tokens with different formatting
+- `VocabProjection` — bottleneck linear layer mapping teacher vocab → student vocab
+- `_aligned_kl()` — per-sample KL with character-span alignment
+- `_flat_kl()` — batched KL for same-tokenizer distillation
 
 ## Multi-GPU Setup
 
-- **Data generation**: vLLM uses tensor parallelism across all `gpu.vllm` GPUs
-- **Training**: vLLM is shut down, then:
-  - Student (with LoRA) is placed on one GPU via `accelerator.prepare()`
-  - Teacher (frozen) is split across all GPUs via `dispatch_model` with an explicit layer-based device map
-  - `VocabProjection` is trained alongside the student LoRA
+### GPU assignment
+
+DDP always assigns rank N → CUDA device N. Accelerate sets `CUDA_VISIBLE_DEVICES` from the `gpu_ids` field in the accelerate config, which controls device remapping. The teacher's `teacher_gpus` must refer to remapped indices within that list and must not overlap with the first `num_processes` devices (claimed by student DDP).
+
+Example with 5 GPUs — 2 for student, 3 for teacher:
+- `accelerate_ddp_5gpu.yaml`: `gpu_ids: "0,1,2,3,4"`, `num_processes: 2`
+- `pipeline.yaml`: `teacher: "2,3,4"`
+- Student DDP rank 0 → device 0, rank 1 → device 1
+- Teacher loaded on devices 2, 3, 4 via `device_map="auto"` with `max_memory`
+
+### Accelerate configs
+
+- `config/accelerate_ddp_2gpu.yaml` — SFT-only, 2 DDP processes on GPUs 2,3
+- `config/accelerate_ddp_5gpu.yaml` — Logit distillation, 2 DDP student processes + 3 teacher GPUs
+
+### Distributed teacher forward
+
+When using logit loss with multiple DDP processes, the teacher runs only on rank 0. Teacher logits are distributed to other ranks via:
+
+1. All ranks `gather` their inputs to rank 0
+2. Rank 0 runs teacher forward on each rank's inputs
+3. Rank 0 `send`s each rank its logits via point-to-point communication
+
+This avoids broadcasting all logits to all ranks, keeping memory usage proportional to each rank's own batch.
+
+### Training flow
+
+- Student (with LoRA) is distributed across DDP ranks via `accelerator.prepare()`
+- Teacher (frozen) is loaded only on rank 0, split across its assigned GPUs via `dispatch_model`
+- `VocabProjection` (if needed) is trained alongside the student LoRA
+- Each training step: logit loss (if enabled) → token loss (if enabled) → gradient accumulation → optimizer step
 
 ## Datasets
 
