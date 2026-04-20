@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class VocabProjection(nn.Module):
@@ -56,6 +57,47 @@ def init_projection_from_tokenizers(projection: VocabProjection, teacher_tokeniz
         projection.proj[1].weight.copy_((U * sqrt_S.unsqueeze(0)))
 
     return projection
+
+
+class TopKProjection:
+    """Maps teacher logits to student vocab via top-K decode-and-reencode.
+
+    Same callable interface as VocabProjection: takes (seq_len, teacher_vocab)
+    logits, returns (seq_len, student_vocab) logits. No learned parameters.
+    """
+
+    def __init__(self, teacher_tokenizer, student_tokenizer, k: int, temperature: float,
+                 student_vocab_size: int = None):
+        self.teacher_tokenizer = teacher_tokenizer
+        self.student_tokenizer = student_tokenizer
+        self.k = k
+        self.temperature = temperature
+        self.student_vocab_size = student_vocab_size or student_tokenizer.vocab_size
+
+    def __call__(self, teacher_logits: torch.Tensor) -> torch.Tensor:
+        seq_len = teacher_logits.size(0)
+        probs = F.softmax(teacher_logits / self.temperature, dim=-1)
+        topk_probs, topk_ids = probs.topk(self.k, dim=-1)
+
+        mapping_cache = {}
+        for tid in topk_ids.unique().tolist():
+            text = self.teacher_tokenizer.decode([tid])
+            mapping_cache[tid] = self.student_tokenizer.encode(text, add_special_tokens=False) if text else []
+
+        result = torch.zeros(seq_len, self.student_vocab_size, device=teacher_logits.device, dtype=teacher_logits.dtype)
+        for pos in range(seq_len):
+            for j in range(self.k):
+                tid = topk_ids[pos, j].item()
+                p = topk_probs[pos, j]
+                s_ids = mapping_cache[tid]
+                if s_ids:
+                    share = p / len(s_ids)
+                    for sid in s_ids:
+                        if sid < self.student_vocab_size:
+                            result[pos, sid] += share
+
+        result = result / result.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        return result.clamp(min=1e-8).log() * self.temperature
 
 
 def build_alignment_weights(student_tokenizer, teacher_tokenizer, text: str):

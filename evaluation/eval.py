@@ -55,6 +55,11 @@ def run_inference(
         raise FileNotFoundError(f"Eval data not found: {eval_path}")
 
     exercises = read_exercises(eval_path)
+    test_mode = cfg.get("training", {}).get("test_mode", False)
+    if test_mode:
+        tool_ex = [e for e in exercises if e.answer_choices and e.answer_choices[0].content.lstrip().startswith('{"')]
+        nlp_ex = [e for e in exercises if not e.answer_choices or not e.answer_choices[0].content.lstrip().startswith('{"')]
+        exercises = tool_ex[:7] + nlp_ex[:7]
     print(f"Loaded {len(exercises)} eval exercises")
 
     output_dir = BASE_PATH / "output" / "inference"

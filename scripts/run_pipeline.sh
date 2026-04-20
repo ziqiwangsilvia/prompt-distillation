@@ -83,7 +83,8 @@ print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
 print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
 print(f'TRAIN_TEMPERATURE=\"{t.get(\"train_temperature\", 2.0)}\"')
 print(f'REVERSE_KL=\"{t.get(\"reverse_kl\", False)}\"')
-print(f'PROJECTION_TYPE=\"{t.get(\"projection_type\", \"tokenizer\")}\"')
+print(f'VOCAB_MAPPING=\"{t.get(\"vocab_mapping\", \"svd\")}\"')
+print(f'N_TOPK=\"{t.get(\"n_topk\", 100)}\"')
 print(f'WARMUP_RATIO=\"{t.get(\"warmup_ratio\", 0.1)}\"')
 _ws = t.get('warmup_steps')
 print(f'WARMUP_STEPS=\"{_ws if _ws is not None else \"\"}\"')
@@ -296,7 +297,8 @@ else
         --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
         --train_temperature "${TRAIN_TEMPERATURE}"
         --reverse_kl "${REVERSE_KL}"
-        --projection_type "${PROJECTION_TYPE}"
+        --vocab_mapping "${VOCAB_MAPPING}"
+        --n_topk "${N_TOPK}"
         --warmup_ratio "${WARMUP_RATIO}"
         --weight_decay "${WEIGHT_DECAY}"
         --max_grad_norm "${MAX_GRAD_NORM}"

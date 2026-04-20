@@ -21,7 +21,7 @@ from models.llm import LLM
 from models.utils import DualOutput, num_parameters
 from evaluation.metrics import Aggregator
 from data.dataloader import build_dataloaders
-from training.projection import VocabProjection
+from training.projection import VocabProjection, TopKProjection
 from training.loss import compute_token_loss, compute_logit_loss
 from training.utils import (
     generate_answers,
@@ -160,17 +160,23 @@ class Trainer:
                 teacher_vocab = tv.item()
                 student_vocab = student.module.config.vocab_size if hasattr(student, 'module') else student.config.vocab_size
                 if teacher_vocab != student_vocab:
-                    self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Adding projection ({hp.projection_type}).")
-                    projection = VocabProjection(teacher_vocab, student_vocab)
-                    if hp.projection_type == "tokenizer" and accelerator.is_main_process:
-                        from training.projection import init_projection_from_tokenizers
-                        self.log("Initializing projection from shared tokens (SVD)...")
-                        init_projection_from_tokenizers(projection, self.teacher_llm.tokenizer, base_llm.tokenizer)
-                    if hp.mixed_precision == "bf16":
-                        projection = projection.to(torch.bfloat16)
-                    projection = accelerator.prepare(projection)
-                    accelerator.register_for_checkpointing(projection)
-                    optimizer.add_param_group({"params": projection.parameters()})
+                    self.log(f"Vocab mismatch: teacher={teacher_vocab}, student={student_vocab}. Using vocab_mapping={hp.vocab_mapping}.")
+                    if hp.vocab_mapping == "topk":
+                        projection = TopKProjection(
+                            self.teacher_llm.tokenizer, base_llm.tokenizer,
+                            k=hp.n_topk, temperature=hp.train_temperature,
+                            student_vocab_size=student_vocab)
+                    else:
+                        projection = VocabProjection(teacher_vocab, student_vocab)
+                        if hp.vocab_mapping == "svd" and accelerator.is_main_process:
+                            from training.projection import init_projection_from_tokenizers
+                            self.log("Initializing projection from shared tokens (SVD)...")
+                            init_projection_from_tokenizers(projection, self.teacher_llm.tokenizer, base_llm.tokenizer)
+                        if hp.mixed_precision == "bf16":
+                            projection = projection.to(torch.bfloat16)
+                        projection = accelerator.prepare(projection)
+                        accelerator.register_for_checkpointing(projection)
+                        optimizer.add_param_group({"params": projection.parameters()})
 
         self.log("Student bf16:", _model_is_bf16(student))
 

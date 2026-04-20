@@ -69,7 +69,8 @@ training:
   logit_loss_weight: 0.5
   train_temperature: 2.0
   reverse_kl: false
-  projection_type: tokenizer
+  vocab_mapping: svd
+  n_topk: 100
   warmup_ratio: 0.1
   warmup_steps: null
   weight_decay: 0.1
