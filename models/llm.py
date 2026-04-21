@@ -126,9 +126,8 @@ class LLM:
         return terminators
 
     def load_model(
-        self, training: bool = False, deepspeed: bool = False, device_map=None, max_memory=None
+        self, training: bool = False, deepspeed: bool = False, device_map=None, max_memory=None, torch_dtype=torch.bfloat16
     ):
-        torch_dtype = torch.bfloat16
         if device_map is None:
             device_map = None if training else "auto"
 
