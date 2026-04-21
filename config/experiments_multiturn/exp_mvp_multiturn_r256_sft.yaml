@@ -20,8 +20,8 @@ dataset:
   partition_type: null
 gpu:
   vllm: 0,1
-  train: 0,1,2,3
-  teacher: 0,1
+  train: 0,1,2,3,4
+  teacher: 2,3,4
   vllm_host: localhost
 questions:
   tool_batches: 10
@@ -78,4 +78,4 @@ training:
   checkpoint_interval_seconds: 0
   max_length: 0
   max_total_length: 0
-  accelerate_config: config/accelerate_ddp_2gpu.yaml
+  accelerate_config: config/accelerate_ddp_5gpu.yaml
