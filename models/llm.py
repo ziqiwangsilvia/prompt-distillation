@@ -80,8 +80,6 @@ class LLM:
     def qwen_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None) -> str:
         new_messages = []
         for i, msg in enumerate(messages):
-            if msg.role not in {Role.SYSTEM, Role.USER}:
-                raise ValueError(f"Wrong message role {msg.role}.")
             content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
             new_messages.append({"role": msg.role.value, "content": content})
         kwargs = {"tokenize": False, "add_generation_prompt": True}
@@ -92,8 +90,6 @@ class LLM:
     def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None) -> str:
         new_messages = []
         for i, msg in enumerate(messages):
-            if msg.role not in {Role.SYSTEM, Role.USER}:
-                raise ValueError(f"Wrong message role {msg.role}.")
             content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
             new_messages.append({"role": msg.role.value, "content": content})
         kwargs = {"tokenize": False, "add_generation_prompt": True}

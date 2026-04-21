@@ -65,6 +65,7 @@ training:
   closed_book: true
   use_tool_token: true
   test_mode: true
+  multi_turn: false
   token_loss_weight: 1.0
   logit_loss_weight: 0.5
   train_temperature: 2.0
