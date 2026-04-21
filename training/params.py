@@ -69,6 +69,7 @@ class DataArgs:
     tools_schema_path: str = ""
     use_tool_token: bool = False
     test_mode: bool = False
+    multi_turn: bool = False
     distractor_dataset: str = ""
     partition_idx: Optional[int] = None
     partition_type: Optional[str] = None

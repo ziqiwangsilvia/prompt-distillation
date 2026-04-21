@@ -5,10 +5,11 @@ QUESTION_PLACEHOLDER = "[[QUESTION_PLACEHOLDER]]"
 
 
 class Role(Enum):
-    """Enumeration for message roles (system, assistant, user)."""
+    """Enumeration for message roles (system, assistant, user, tool)."""
     SYSTEM = "system"
     AI = "assistant"
     USER = "user"
+    TOOL = "tool"
 
     @classmethod
     def from_value(cls, value: str) -> "Role":
@@ -48,10 +49,13 @@ class Message:
     def from_dict(cls, d: dict) -> "Message":
         """Parse Message from a dict."""
         role = Role.from_value(d["role"])
-        content = d["content"].strip()
+        content = d.get("content", "").strip()
         tags = set(d.get("tags", []))
         short_content = d.get("short_content")
-        return Message(role, content, tags, short_content)
+        msg = Message(role, content, tags, short_content)
+        if "tool_calls" in d:
+            msg.tool_calls = d["tool_calls"]
+        return msg
 
     def _header(self) -> str:
         name = self.__class__.__name__
@@ -73,10 +77,13 @@ class Message:
 
     def to_dict(self) -> dict:
         """Return the message as a dict (for serialization)."""
-        return {
+        d = {
             "role": self.role.value,
             "content": self.content or "",
         }
+        if hasattr(self, "tool_calls"):
+            d["tool_calls"] = self.tool_calls
+        return d
 
 
 def merge_messages(messages: List[Message]) -> List[Message]:

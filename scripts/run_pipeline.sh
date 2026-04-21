@@ -79,6 +79,7 @@ print(f'MIXED_PRECISION=\"{t.get(\"mixed_precision\", \"bf16\")}\"')
 print(f'CLOSED_BOOK=\"{t.get(\"closed_book\", True)}\"')
 print(f'USE_TOOL_TOKEN=\"{t.get(\"use_tool_token\", False)}\"')
 print(f'TEST_MODE=\"{t.get(\"test_mode\", False)}\"')
+print(f'MULTI_TURN=\"{t.get(\"multi_turn\", False)}\"')
 print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
 print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
 print(f'TRAIN_TEMPERATURE=\"{t.get(\"train_temperature\", 2.0)}\"')
@@ -293,6 +294,7 @@ else
         --closed_book "${CLOSED_BOOK}"
         --use_tool_token "${USE_TOOL_TOKEN}"
         --test_mode "${TEST_MODE}"
+        --multi_turn "${MULTI_TURN}"
         --token_loss_weight "${TOKEN_LOSS_WEIGHT}"
         --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
         --train_temperature "${TRAIN_TEMPERATURE}"
