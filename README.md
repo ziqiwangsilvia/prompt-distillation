@@ -132,9 +132,55 @@ dataset:
 
 ## Cross-Tokenizer Distillation
 
-When the teacher and student use different tokenizers (e.g., Qwen → Llama), token-level KL divergence requires alignment since the same text produces different token sequences.
+When the teacher and student use different tokenizers (e.g., Qwen → Llama), token-level KL divergence requires solving two alignment problems:
 
-We use character-span alignment: each tokenizer provides character offsets for its tokens via `return_offsets_mapping=True`. For each student token, we find overlapping teacher tokens and compute weights proportional to the number of shared characters.
+1. **Vocab mapping** — the teacher and student have different vocabularies, so teacher logits must be converted to the student vocab space
+2. **Position alignment** — the same text produces different token sequences, so teacher and student positions must be aligned
+
+### Vocab Mapping (`vocab_mapping`)
+
+Controlled by the `vocab_mapping` parameter in `pipeline.yaml`:
+
+#### `topk` — Top-K Revert Mapping (no learned parameters)
+
+For each teacher position, take the top-K tokens by probability, decode each back to text, re-encode with the student tokenizer, and place the probability mass at the corresponding student token IDs. If a teacher token maps to multiple student tokens, the probability is split evenly (1/n) across them.
+
+```
+Teacher position — token "happi" (prob 0.50):
+  decode("happi") → "happi"
+  student_tokenizer.encode("happi") → [17028, 234]  (2 tokens)
+  → student token 17028 gets 0.25, student token 234 gets 0.25
+```
+
+The result is a sparse distribution in student vocab space — only the ~K mapped entries are non-zero. With forward KL (`reverse_kl: false`), this is mathematically equivalent to using the full distribution since forward KL only sums over tokens where the teacher has mass.
+
+```yaml
+training:
+  vocab_mapping: topk
+  n_topk: 100          # number of top teacher tokens to map (default: 100)
+```
+
+#### `svd` — Learned Projection with SVD Initialization
+
+A bottleneck linear layer (`teacher_vocab → 4096 → student_vocab`) initialized via SVD of the shared-token mapping matrix. Tokens that exist in both vocabularies are mapped via string matching, then the mapping is factored into two linear layers. Trained alongside the student LoRA.
+
+```yaml
+training:
+  vocab_mapping: svd
+```
+
+#### `bottleneck` — Learned Projection with Random Initialization
+
+Same architecture as `svd` but with random weight initialization.
+
+```yaml
+training:
+  vocab_mapping: bottleneck
+```
+
+### Position Alignment (character-span)
+
+Each tokenizer provides character offsets for its tokens via `return_offsets_mapping=True`. For each student token, we find overlapping teacher tokens and compute weights proportional to the number of shared characters.
 
 For example, given the text `"unhappiness"`:
 - Student tokens: `["unhapp", "iness"]` → spans `(0,6)`, `(6,11)`
@@ -145,15 +191,40 @@ The alignment weight for student token `"unhapp"` (0-6):
 - `"happi"` (2-7): overlap = 4 → weight 4/6
 - `"ness"` (7-11): overlap = 0
 
-The aligned teacher distribution at each student position is a weighted average of overlapping teacher token probabilities (in probability space, not logit space), then KL divergence is computed on the result.
+### How They Compose
 
-When vocab sizes differ, a learned bottleneck projection (`VocabProjection`) maps teacher logits to the student vocab space before alignment. The projection is trained alongside the student LoRA.
+The two steps are applied sequentially:
+
+```
+teacher logits (teacher vocab, per teacher position)
+        │
+        ▼
+   Vocab mapping (topk / svd / bottleneck)
+   Converts teacher vocab → student vocab
+        │
+        ▼
+teacher probs (student vocab, per teacher position)
+        │
+        ▼
+   Position alignment: align @ t_probs
+   Character-span weighted average across positions
+        │
+        ▼
+aligned teacher probs (student vocab, per student position)
+        │
+        ▼
+   KL(student || aligned_teacher)
+```
+
+Vocab mapping handles the vocabulary axis, character-span alignment handles the position axis.
 
 ### Key functions
 
+- `TopKProjection` — top-K decode/reencode mapping (no learned params)
+- `VocabProjection` — bottleneck linear layer mapping teacher vocab → student vocab
+- `init_projection_from_tokenizers()` — SVD initialization for VocabProjection
 - `build_alignment_weights()` — builds a sparse alignment matrix from character spans
 - `build_shared_alignment()` — alignment for tool-call tokens with different formatting
-- `VocabProjection` — bottleneck linear layer mapping teacher vocab → student vocab
 - `_aligned_kl()` — per-sample KL with character-span alignment
 - `_flat_kl()` — batched KL for same-tokenizer distillation
 
