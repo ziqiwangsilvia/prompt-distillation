@@ -1,5 +1,5 @@
 project:
-  run_name: mvp-large_r256_sft
+  run_name: mt_mvp_tool_summary_r256_log05_t2
   group_name: null
   train_only: true
   use_wandb: false
@@ -13,15 +13,15 @@ dataset:
   name: tool_calling
   variant: default
   datapath: output/teacher_answers
-  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp-large/train.json
-  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp-large/val.json
+  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/train.json
+  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/val.json
   distractor_dataset: ''
   partition_idx: null
   partition_type: null
 gpu:
   vllm: 0,1
-  train: 0,1,2,3
-  teacher: 0,1
+  train: 0,1,2,3,4
+  teacher: 2,3,4
   vllm_host: localhost
 questions:
   tool_batches: 10
@@ -57,10 +57,13 @@ training:
   closed_book: true
   use_tool_token: true
   test_mode: false
+  multi_turn: true
   token_loss_weight: 1.0
-  logit_loss_weight: 0
+  logit_loss_weight: 0.5
   train_temperature: 2
   reverse_kl: false
+  vocab_mapping: topk
+  n_topk: 100
   warmup_ratio: 0.1
   warmup_steps: null
   weight_decay: 0.1
@@ -77,4 +80,4 @@ training:
   checkpoint_interval_seconds: 0
   max_length: 0
   max_total_length: 0
-  accelerate_config: config/accelerate_ddp_2gpu.yaml
+  accelerate_config: config/accelerate_ddp_5gpu.yaml

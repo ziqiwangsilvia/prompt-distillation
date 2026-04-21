@@ -1,5 +1,5 @@
 project:
-  run_name: mvp_r256_sft
+  run_name: mt_mvp_tool_summary_r128_sft
   group_name: null
   train_only: true
   use_wandb: false
@@ -13,8 +13,8 @@ dataset:
   name: tool_calling
   variant: default
   datapath: output/teacher_answers
-  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp/train.json
-  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp/val.json
+  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/train.json
+  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/val.json
   distractor_dataset: ''
   partition_idx: null
   partition_type: null
@@ -52,11 +52,12 @@ training:
   batch_size: 4
   micro_batch_size: 1
   n_epochs: 2
-  lora_r: 256
+  lora_r: 128
   mixed_precision: bf16
   closed_book: true
   use_tool_token: true
   test_mode: false
+  multi_turn: true
   token_loss_weight: 1.0
   logit_loss_weight: 0
   train_temperature: 2
