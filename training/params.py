@@ -40,7 +40,12 @@ class TeacherArgs:
     train_temperature: float = 2.0
     token_loss_weight: float = 0.0
     logit_loss_weight: float = 1.0
+    distillation_type: str = "off_policy"  # "off_policy" (logit KL) or "on_policy" (student generates, teacher ranks via DPO)
     reverse_kl: bool = False
+    dpo_beta: float = 0.1  # DPO temperature (on_policy only)
+    n_candidates: int = 2  # number of student candidates for teacher ranking (on_policy only)
+    dpo_max_new_tokens: int = 200  # max tokens per candidate generation (on_policy only)
+    dpo_generation_temperature: float = 0.7  # sampling temperature for candidate generation (on_policy only)
     vocab_mapping: str = "svd"  # "svd" (from shared tokens), "bottleneck" (random init), or "topk" (top-K revert, no learned params)
     n_topk: int = 100  # number of top-K teacher tokens to use when vocab_mapping="topk"
 

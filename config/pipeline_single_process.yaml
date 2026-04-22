@@ -1,7 +1,7 @@
 # Pipeline configuration
 
 project:
-  run_name: test_multi_turn
+  run_name: test_dpo
   group_name: null
   train_only: true
   use_wandb: false
@@ -68,6 +68,11 @@ training:
   multi_turn: true
   token_loss_weight: 1.0
   logit_loss_weight: 0.5
+  distillation_type: on_policy
+  dpo_beta: 0.1
+  n_candidates: 2
+  dpo_max_new_tokens: 200
+  dpo_generation_temperature: 0.7
   train_temperature: 2.0
   reverse_kl: false
   vocab_mapping: topk

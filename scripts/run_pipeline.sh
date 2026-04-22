@@ -82,6 +82,11 @@ print(f'TEST_MODE=\"{t.get(\"test_mode\", False)}\"')
 print(f'MULTI_TURN=\"{t.get(\"multi_turn\", False)}\"')
 print(f'TOKEN_LOSS_WEIGHT=\"{t.get(\"token_loss_weight\", 1.0)}\"')
 print(f'LOGIT_LOSS_WEIGHT=\"{t.get(\"logit_loss_weight\", 0.0)}\"')
+print(f'DISTILLATION_TYPE=\"{t.get(\"distillation_type\", \"off_policy\")}\"')
+print(f'DPO_BETA=\"{t.get(\"dpo_beta\", 0.1)}\"')
+print(f'N_CANDIDATES=\"{t.get(\"n_candidates\", 2)}\"')
+print(f'DPO_MAX_NEW_TOKENS=\"{t.get(\"dpo_max_new_tokens\", 200)}\"')
+print(f'DPO_GENERATION_TEMPERATURE=\"{t.get(\"dpo_generation_temperature\", 0.7)}\"')
 print(f'TRAIN_TEMPERATURE=\"{t.get(\"train_temperature\", 2.0)}\"')
 print(f'REVERSE_KL=\"{t.get(\"reverse_kl\", False)}\"')
 print(f'VOCAB_MAPPING=\"{t.get(\"vocab_mapping\", \"svd\")}\"')
@@ -297,6 +302,11 @@ else
         --multi_turn "${MULTI_TURN}"
         --token_loss_weight "${TOKEN_LOSS_WEIGHT}"
         --logit_loss_weight "${LOGIT_LOSS_WEIGHT}"
+        --distillation_type "${DISTILLATION_TYPE}"
+        --dpo_beta "${DPO_BETA}"
+        --n_candidates "${N_CANDIDATES}"
+        --dpo_max_new_tokens "${DPO_MAX_NEW_TOKENS}"
+        --dpo_generation_temperature "${DPO_GENERATION_TEMPERATURE}"
         --train_temperature "${TRAIN_TEMPERATURE}"
         --reverse_kl "${REVERSE_KL}"
         --vocab_mapping "${VOCAB_MAPPING}"

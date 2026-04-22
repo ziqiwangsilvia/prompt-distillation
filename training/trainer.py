@@ -23,6 +23,7 @@ from evaluation.metrics import Aggregator
 from data.dataloader import build_dataloaders
 from training.projection import VocabProjection, TopKProjection
 from training.loss import compute_token_loss, compute_logit_loss
+from training import PADDING_VALUE
 from training.utils import (
     generate_answers,
     extract_primitive_config,
@@ -59,7 +60,7 @@ class Trainer:
         self.student, self.teacher, self.optimizer, self.projection = self._init_models()
 
         # Steps
-        if hp.logit_loss_weight:
+        if hp.logit_loss_weight or hp.distillation_type == "on_policy":
             self.n_batches = math.ceil(len(self.logit_train_ds) / hp.n_logit_micro_batches_per_batch / hp.logit_loss_micro_batch_size / hp.devices)
         else:
             self.n_batches = math.ceil(len(self.token_train_ds) / hp.n_token_micro_batches_per_batch / hp.token_loss_micro_batch_size / hp.devices)
@@ -133,7 +134,7 @@ class Trainer:
 
         teacher = None
         projection = None
-        if hp.logit_loss_weight:
+        if hp.logit_loss_weight or hp.distillation_type == "on_policy":
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
@@ -222,7 +223,7 @@ class Trainer:
 
             # Generate
             if hp.generate and step % hp.generation_interval == 0:
-                if (hp.logit_loss_weight) and self.logit_train_ds:
+                if self.logit_train_ds:
                     ix = torch.randint(high=len(self.logit_train_ds), size=(1,)).item()
                     generation_samples = [self.logit_train_ds[ix]]
                 elif self.token_train_ds:
@@ -243,8 +244,13 @@ class Trainer:
 
             step_t0 = time.perf_counter()
 
-            # Logit loss
-            if hp.logit_loss_weight:
+            # Distillation
+            if hp.distillation_type == "on_policy":
+                batch = next(iter_logit)
+                on_policy_loss_val = self._on_policy_step(batch)
+                if is_logging:
+                    train_metrics['on_policy_loss'] = on_policy_loss_val
+            elif hp.logit_loss_weight:
                 for _ in range(hp.n_logit_micro_batches_per_batch):
                     batch = next(iter_logit)
                     logit_loss = self._compute_logit_loss(batch)
@@ -254,7 +260,7 @@ class Trainer:
                 if is_logging:
                     train_metrics['logit_loss'] = logit_loss.item()
 
-            # Token loss
+            # Token loss (SFT)
             if hp.token_loss_weight:
                 for _ in range(hp.n_token_micro_batches_per_batch):
                     batch = next(iter_token)
@@ -305,6 +311,223 @@ class Trainer:
             accelerator=self.accelerator,
         )
 
+    def _on_policy_step(self, batch):
+        """On-policy DPO: student generates N responses, teacher ranks by perplexity.
+
+        Returns scalar loss value (float) for logging.
+        """
+        from training.dpo import dpo_loss
+        from training import IGNORE_INDEX
+        from data.dataset import prepare_answer_tokens
+        from data.tool_call_format import extract_tool_call, format_tool_call
+
+        accelerator = self.accelerator
+        hp = self.hp
+        device = accelerator.device
+        student_family = self.base_llm.model_family
+        teacher_family = self.teacher_llm.model_family if self.teacher_llm else student_family
+        n_candidates = hp.n_candidates
+        unwrapped_student = accelerator.unwrap_model(self.student)
+
+        prompt_key = 'student_closed_seqs' if hp.closed_book else 'student_open_seqs'
+        label_key = 'student_closed_labels' if hp.closed_book else 'student_open_labels'
+        seqs = batch[prompt_key]
+        labels = batch[label_key]
+        teacher_prompts = batch['teacher_seqs']
+        teacher_masks = batch['teacher_masks']
+        batch_size = seqs.size(0)
+
+        # Extract prompt-only tokens: first non-IGNORE_INDEX position marks answer start
+        prompt_list = []
+        for i in range(batch_size):
+            answer_positions = (labels[i] != IGNORE_INDEX).nonzero(as_tuple=False)
+            prompt_len = answer_positions[0].item() if len(answer_positions) > 0 else seqs.size(1)
+            p = seqs[i:i+1, :prompt_len]
+            mask = (p[0] != PADDING_VALUE)
+            p = p[:, mask]
+            prompt_list.append(p)
+
+        # Each rank generates N candidates for its own prompts
+        unwrapped_student.eval()
+        all_candidates = []
+        with torch.no_grad():
+            terminators = self.base_llm.get_terminators()
+            for i in range(batch_size):
+                candidates = []
+                for _ in range(n_candidates):
+                    out = unwrapped_student.generate(
+                        input_ids=prompt_list[i], max_new_tokens=hp.dpo_max_new_tokens,
+                        temperature=hp.dpo_generation_temperature,
+                        do_sample=True, eos_token_id=terminators)
+                    new_tokens = out[0, prompt_list[i].size(1):]
+                    candidates.append(self.base_llm.tokenizer.decode(new_tokens, skip_special_tokens=False))
+                all_candidates.append(candidates)
+        unwrapped_student.train()
+
+        # Teacher ranks candidates — gather to rank 0, score, scatter back
+        chosen_idxs, rejected_idxs = self._teacher_rank_candidates(
+            all_candidates, teacher_prompts, teacher_masks,
+            student_family, teacher_family, batch_size, n_candidates)
+
+        torch.cuda.empty_cache()
+
+        # Build DPO pairs and compute loss
+        def _to_student_tokens(raw_text):
+            tc = extract_tool_call(raw_text, student_family)
+            if tc is not None:
+                text = format_tool_call(tc, student_family)
+                return prepare_answer_tokens(self.base_llm, text, 0, truncated=False, use_tool_token=hp.use_tool_token).to(device)
+            text = raw_text
+            for tag in ['<|python_tag|>', '<|eom_id|>', '<|eot_id|>']:
+                text = text.replace(tag, '')
+            return prepare_answer_tokens(self.base_llm, text.strip(), 0, truncated=False, use_tool_token=False).to(device)
+
+        n_valid = 0
+        total_loss_val = 0.0
+        for i in range(batch_size):
+            if chosen_idxs[i] == rejected_idxs[i]:
+                continue
+            p = prompt_list[i].to(device)
+            chosen_tokens = _to_student_tokens(all_candidates[i][chosen_idxs[i]])
+            rejected_tokens = _to_student_tokens(all_candidates[i][rejected_idxs[i]])
+
+            # dpo_loss calls backward internally for memory efficiency
+            loss_val = dpo_loss(unwrapped_student, p, chosen_tokens, rejected_tokens, beta=hp.dpo_beta)
+            total_loss_val += loss_val
+            n_valid += 1
+
+        if n_valid > 0:
+            # Average gradients over batch (backward was called per sample)
+            for param in unwrapped_student.parameters():
+                if param.grad is not None:
+                    param.grad.div_(batch_size)
+            if accelerator.num_processes > 1:
+                import torch.distributed as dist
+                for param in unwrapped_student.parameters():
+                    if param.grad is not None:
+                        dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+
+        return total_loss_val / batch_size if n_valid > 0 else 0.0
+
+    def _teacher_rank_candidates(self, all_candidates, teacher_prompts, teacher_masks,
+                                 student_family, teacher_family, batch_size, n_candidates):
+        """Score candidates with teacher on rank 0, return chosen/rejected indices per sample.
+
+        In multi-GPU: gather candidates + teacher prompts from all ranks to rank 0,
+        score, scatter indices back.
+        """
+        accelerator = self.accelerator
+        device = accelerator.device
+        use_distributed = accelerator.num_processes > 1
+
+        if use_distributed:
+            import torch.distributed as dist
+            import json
+
+            # Gather candidate texts from all ranks
+            payload = json.dumps(all_candidates).encode()
+            local_size = torch.tensor([len(payload)], dtype=torch.long, device=device)
+            all_sizes = [torch.zeros(1, dtype=torch.long, device=device) for _ in range(accelerator.num_processes)]
+            dist.all_gather(all_sizes, local_size)
+
+            max_size = max(s.item() for s in all_sizes)
+            padded = torch.zeros(max_size, dtype=torch.uint8, device=device)
+            padded[:len(payload)] = torch.tensor(list(payload), dtype=torch.uint8, device=device)
+            gathered_cands = [torch.zeros(max_size, dtype=torch.uint8, device=device) for _ in range(accelerator.num_processes)]
+            dist.all_gather(gathered_cands, padded)
+
+            # Gather teacher prompts/masks (different samples per rank)
+            local_seq_len = torch.tensor([teacher_prompts.shape[1]], device=device)
+            all_seq_lens = [torch.zeros(1, dtype=torch.long, device=device) for _ in range(accelerator.num_processes)]
+            dist.all_gather(all_seq_lens, local_seq_len)
+            max_seq = max(s.item() for s in all_seq_lens)
+
+            padded_tp = torch.zeros(batch_size, max_seq, dtype=teacher_prompts.dtype, device=device)
+            padded_tp[:, :teacher_prompts.shape[1]] = teacher_prompts
+            gathered_tp = [torch.zeros_like(padded_tp) for _ in range(accelerator.num_processes)]
+            dist.all_gather(gathered_tp, padded_tp)
+
+            padded_tm = torch.zeros(batch_size, max_seq, dtype=teacher_masks.dtype, device=device)
+            padded_tm[:, :teacher_masks.shape[1]] = teacher_masks
+            gathered_tm = [torch.zeros_like(padded_tm) for _ in range(accelerator.num_processes)]
+            dist.all_gather(gathered_tm, padded_tm)
+
+            # Rank 0 scores all ranks' candidates with their corresponding teacher prompts
+            if accelerator.is_main_process:
+                all_ranks_chosen = []
+                all_ranks_rejected = []
+                for r in range(accelerator.num_processes):
+                    rank_cands = json.loads(bytes(gathered_cands[r][:all_sizes[r].item()].cpu().tolist()))
+                    sl = all_seq_lens[r].item()
+                    rank_tp = gathered_tp[r][:, :sl]
+                    rank_tm = gathered_tm[r][:, :sl]
+                    c, rej = self._score_with_teacher(
+                        rank_cands, rank_tp, rank_tm,
+                        student_family, teacher_family, batch_size, n_candidates)
+                    all_ranks_chosen.extend(c)
+                    all_ranks_rejected.extend(rej)
+                idx_tensor = torch.tensor(all_ranks_chosen + all_ranks_rejected, device=device)
+            else:
+                total = batch_size * accelerator.num_processes
+                idx_tensor = torch.zeros(total * 2, dtype=torch.long, device=device)
+
+            dist.broadcast(idx_tensor, src=0)
+            total = batch_size * accelerator.num_processes
+            my_rank = accelerator.process_index
+            chosen_idxs = idx_tensor[my_rank * batch_size:(my_rank + 1) * batch_size].tolist()
+            rejected_idxs = idx_tensor[total + my_rank * batch_size:total + (my_rank + 1) * batch_size].tolist()
+        else:
+            chosen_idxs, rejected_idxs = self._score_with_teacher(
+                all_candidates, teacher_prompts, teacher_masks,
+                student_family, teacher_family, batch_size, n_candidates)
+
+        return chosen_idxs, rejected_idxs
+
+    def _score_with_teacher(self, candidates, teacher_prompts, teacher_masks,
+                            student_family, teacher_family, batch_size, n_candidates):
+        """Score a single rank's candidates with the teacher. Returns (chosen_idxs, rejected_idxs)."""
+        from data.tool_call_format import extract_tool_call, format_tool_call
+
+        chosen_idxs = [0] * batch_size
+        rejected_idxs = [min(1, n_candidates - 1)] * batch_size
+
+        if self.teacher is None or isinstance(self.teacher, str):
+            return chosen_idxs, rejected_idxs
+
+        teacher_device = next(self.teacher.parameters()).device
+        # Find prompt length: index of first True (answer token) in mask
+        # Mask is [False...(prompt) | True...(answer) | False...(padding)]
+        with torch.no_grad():
+            for i in range(batch_size):
+                # First True position = prompt length
+                true_positions = teacher_masks[i].nonzero(as_tuple=False)
+                if len(true_positions) == 0:
+                    continue  # no answer tokens, skip
+                plen = true_positions[0].item()
+                t_prompt = teacher_prompts[i:i+1, :plen].to(teacher_device)
+                ppls = []
+                for raw_text in candidates[i]:
+                    tc = extract_tool_call(raw_text, student_family)
+                    if tc is not None:
+                        text = format_tool_call(tc, teacher_family)
+                    else:
+                        text = raw_text
+                        for tag in ['<|python_tag|>', '<|eom_id|>', '<|eot_id|>']:
+                            text = text.replace(tag, '')
+                        text = text.strip()
+                    c_tokens = self.teacher_tokenizer.encode(text, add_special_tokens=False, return_tensors="pt").to(teacher_device)
+                    full_seq = torch.cat([t_prompt, c_tokens], dim=1)
+                    logits = self.teacher.forward(full_seq[:, :-1]).logits
+                    resp_logits = logits[:, plen-1:]
+                    resp_targets = full_seq[:, plen:]
+                    ce = torch.nn.functional.cross_entropy(
+                        resp_logits.flatten(0, 1), resp_targets.flatten(), reduction='mean')
+                    ppls.append(ce.item())
+                chosen_idxs[i] = ppls.index(min(ppls))
+                rejected_idxs[i] = ppls.index(max(ppls))
+
+        return chosen_idxs, rejected_idxs
+
     # ── Validation ─────────────────────────────────────────
 
     def validate(self):
@@ -322,7 +545,7 @@ class Trainer:
                 metrics_total.update(total)
                 metrics_by_group.update(by_group)
 
-            if self.logit_val_loader is not None:
+            if self.logit_val_loader is not None and self.hp.distillation_type != "on_policy":
                 group_names = self.logit_val_loader.dataset.lesson_names
                 aggregator = Aggregator(group_names, self.accelerator.device)
                 for _, batch in enumerate(self.logit_val_loader, start=1):

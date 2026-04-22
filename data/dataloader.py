@@ -28,10 +28,11 @@ def build_dataloaders(base_llm: LLM, data, hp, teacher_llm: LLM = None, tools: l
     train_files, val_files = data
 
     # Datasets
-    logit_train_ds = _init_logit_dataset(base_llm, train_files, hp, teacher_llm=teacher_llm, tools=tools) if hp.logit_loss_weight else None
+    needs_logit_data = hp.logit_loss_weight or hp.distillation_type == "on_policy"
+    logit_train_ds = _init_logit_dataset(base_llm, train_files, hp, teacher_llm=teacher_llm, tools=tools) if needs_logit_data else None
     token_train_ds = _init_token_dataset(base_llm, train_files, hp, tools=tools) if hp.token_loss_weight else None
     max_samples = 7 if hp.test_mode else 0
-    logit_val_ds = StudentTeacherDataset(base_llm, val_files, datapath=hp.datapath, teacher_llm=teacher_llm, tools=tools, use_tool_token=hp.use_tool_token, max_samples=max_samples, multi_turn=hp.multi_turn) if hp.logit_loss_weight and val_files else None
+    logit_val_ds = StudentTeacherDataset(base_llm, val_files, datapath=hp.datapath, teacher_llm=teacher_llm, tools=tools, use_tool_token=hp.use_tool_token, max_samples=max_samples, multi_turn=hp.multi_turn) if needs_logit_data and val_files else None
     token_val_ds = TeacherDataset(base_llm, val_files, datapath=hp.datapath, tools=tools, use_tool_token=hp.use_tool_token, max_samples=max_samples, multi_turn=hp.multi_turn) if hp.token_loss_weight and val_files else None
 
     # Train loaders

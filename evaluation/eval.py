@@ -91,7 +91,20 @@ def run_inference(
         for ex in exercises:
             student_content = extract_question(ex)
             questions.append(student_content)
-            refs.append(ex.answer_choices[0].content if ex.answer_choices else None)
+            if ex.answer_choices:
+                refs.append(ex.answer_choices[0].content)
+            else:
+                # Multi-turn: first assistant turn is the reference
+                first_asst = next((m for m in ex.messages if m.role == Role.AI), None)
+                if first_asst and hasattr(first_asst, 'tool_calls') and first_asst.tool_calls:
+                    import json as _json
+                    tc = first_asst.tool_calls[0]
+                    func = tc if "name" in tc else tc.get("function", tc)
+                    refs.append(_json.dumps({"name": func["name"], "arguments": func.get("arguments", func.get("parameters", {}))}))
+                elif first_asst:
+                    refs.append(first_asst.content)
+                else:
+                    refs.append(None)
             msgs = [Message(Role.USER, student_content)]
             prompts.append(llm.messages_to_prompt(msgs, tools=tools))
 
