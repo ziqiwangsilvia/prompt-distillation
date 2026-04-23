@@ -15,8 +15,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 from models.llm import LLM
 from models.messages import Message, Role
 from models.configs import MODEL_CONFIGS
-from data.paths import DELIMITER
-from curriculum.exercise_with_answers import ExerciseWithAnswers
+from paths import DELIMITER
+from data.exercise import ExerciseWithAnswers
 
 
 def warn(msg: str) -> None:
@@ -83,11 +83,12 @@ def generate_answers(
     return answers
 
 
-def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm: LLM = None, tools: list = None, student_tools: list = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm: LLM = None, tools: list = None, student_tools: list = None, date_str: str = "") -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Tokenize teacher and student prompts using chat template.
     Teacher: material as system message + question (uses teacher_llm tokenizer if provided).
     Student open-book: material as system message + question (student tokenizer).
     Student closed-book: default system message + question (student tokenizer).
+    If date_str is provided, it is appended to the student closed-book system message.
     Returns (student_closed_tokens, student_open_tokens, teacher_tokens).
     """
     t_llm = teacher_llm or llm
@@ -104,8 +105,8 @@ def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm
     student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools))
     llm.opening_message = saved
 
-    # Student closed-book: default system message
-    student_closed_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools))
+    # Student closed-book: default system message with date in template
+    student_closed_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools, date_string=date_str))
 
     return student_closed_tokens, student_open_tokens, teacher_tokens
 

@@ -5,7 +5,7 @@ from typing import Optional
 
 from peft import LoraConfig
 
-from data.paths import BASE_PATH
+from paths import BASE_PATH
 from models.configs import MODEL_CONFIGS, ModelConfig
 from models.messages import Message, Role
 

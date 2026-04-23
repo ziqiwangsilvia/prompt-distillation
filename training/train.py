@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import randomname
 
-from data.naming import generate_lesson_name, generate_exam_name, generate_augmented_filename
 from models.llm import LLM
 from models.configs import create_model_flags
 from models.utils import set_seed
@@ -47,6 +46,7 @@ def main(args: AllArgs):
         val_file = args.custom_val_data if args.custom_val_data else None
         args.datapath = ""  # custom paths are absolute, not relative to datapath
     else:
+        from curriculum.naming import generate_lesson_name, generate_exam_name, generate_augmented_filename
         lesson_model_flags = create_model_flags(args.lesson_model)
         exam_model_flags = create_model_flags(args.exam_model)
 

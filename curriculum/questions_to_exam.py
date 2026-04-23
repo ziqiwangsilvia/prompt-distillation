@@ -5,8 +5,8 @@ from typing import Optional
 
 from datasets import load_dataset
 
-from data.naming import generate_exam_filename, generate_exam_name, generate_question_path
-from data.loading import load_squadshifts
+from curriculum.naming import generate_exam_filename, generate_exam_name, generate_question_path
+from curriculum.loading import load_squadshifts
 from evaluation.utils import get_prompt_context
 
 

@@ -3,7 +3,7 @@ import json
 import os
 from typing import Optional, List, Dict
 
-from data.paths import BASE_PATH, DELIMITER
+from paths import BASE_PATH, DELIMITER
 from models.utils import remove_empty
 
 

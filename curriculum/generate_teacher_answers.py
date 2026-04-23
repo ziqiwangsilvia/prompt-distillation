@@ -10,8 +10,8 @@ from tqdm import tqdm
 from openai import OpenAI
 from vllm import LLM as vLLM
 
-from data.paths import DATA_PATH
-from data.naming import generate_augmented_filename, generate_lesson_filename, generate_exam_filename
+from paths import DATA_PATH
+from curriculum.naming import generate_augmented_filename, generate_lesson_filename, generate_exam_filename
 from models.llm import LLM, get_model_family
 from models.messages import Message, Role, merge_messages
 from models.configs import create_model_flags, MODEL_CONFIGS, get_model_config
