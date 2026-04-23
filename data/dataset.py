@@ -1,104 +1,31 @@
 import numpy as np
-import os
-from pathlib import Path
-import re
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from paths import DATA_PATH
-from data.tool_call_format import to_native_format, normalize_tool_call, format_tool_call
-from models.messages import Message, Role, QUESTION_PLACEHOLDER
-from data.exercise import ExerciseWithAnswers
+from models.messages import QUESTION_PLACEHOLDER
 from training import IGNORE_INDEX
-from training.utils import tokenize_teacher_student, read_exercises, ensure_path_exists, extract_question, extract_material_and_question
+from data.samples import load_samples
 
-
-def _stratified_sample(exercises, n=7):
-    """Pick n tool-call and n NLP exercises based on ground truth."""
-    tool, nlp = [], []
-    for ex in exercises:
-        if ex.answer_choices and ex.answer_choices[0].content.lstrip().startswith('{"'):
-            tool.append(ex)
-        else:
-            nlp.append(ex)
-    return tool[:n] + nlp[:n]
 
 DISTRACTOR_PROB = 0.6
 
 
-def prepare_answer_tokens(llm, content: str, max_length: int, truncated: bool, use_tool_token: bool = False) -> torch.Tensor:
-    """Tokenize answer content and add EOS."""
-    is_tool = use_tool_token and llm.model_family == "llama" and content.lstrip().startswith('{"name"')
-    if is_tool:
-        content = "<|python_tag|>" + content
-    tokens = llm.tokenize(content)
-    if is_tool:
-        eom_id = llm.tokenizer.convert_tokens_to_ids("<|eom_id|>")
-        tokens = torch.cat([tokens, torch.tensor([[eom_id]])], dim=1)
-    else:
-        tokens = llm.add_eos(tokens)
-    if max_length:
-        tokens = tokens[:, :max_length]
-    return tokens
-
-
 class StudentTeacherDataset(torch.utils.data.Dataset):
+    """Dataset for distillation training (logit loss / DPO).
+    Each sample includes student (open/closed-book) and teacher prompts and answers.
     """
-    Dataset for training with exercises and teacher answers.
-    Each sample includes both student and teacher prompts and answers.
-    """
-    def __init__(
-        self,
-        llm,
-        filenames: List[str],
-        verbose: bool = False,
-        datapath: Path = DATA_PATH,
-        max_length: int = 0,
-        debug: bool = False,
-        teacher_llm=None,
-        tools: list = None,
-        use_tool_token: bool = False,
-        max_samples: int = 0,
-        multi_turn: bool = False,
-    ):
-        assert isinstance(filenames, list), "filenames should be a list"
-        self.samples: List[Dict[str, Any]] = []
-        self.lesson_names: List[str] = []
-        t_llm = teacher_llm or llm
+    def __init__(self, llm, filenames, verbose=False, datapath=DATA_PATH,
+                 max_length=0, debug=False, teacher_llm=None, tools=None,
+                 use_tool_token=False, max_samples=0, multi_turn=False):
         if verbose:
             print("==== StudentTeacherDataset ====", flush=True)
-
-        for filename in filenames:
-            filepath = Path(datapath) / filename
-            ensure_path_exists(filepath)
-            lesson_name = os.path.splitext(os.path.basename(filename))[0]
-            self.lesson_names.append(lesson_name)
-            lesson_ix = len(self.lesson_names) - 1
-            exercises = read_exercises(filepath)
-            if max_samples:
-                exercises = _stratified_sample(exercises, n=max_samples)
-            training_pairs = 0
-            for ex_i, exercise in enumerate(exercises):
-                date_str = exercise.metadata.get("date", "")
-                if multi_turn:
-                    from data.samples import build_multiturn_samples
-                    builder = build_multiturn_samples
-                else:
-                    from data.samples import build_singleturn_samples
-                    builder = build_singleturn_samples
-                samples = builder(
-                    exercise, llm, teacher_llm=teacher_llm, tools=tools,
-                    use_tool_token=use_tool_token, max_length=max_length,
-                    date_str=date_str)
-                for s in samples:
-                    s["lesson_ix"] = lesson_ix
-                    s["question"] = extract_question(exercise)
-                self.samples.extend(samples)
-                training_pairs += len(samples)
-            if verbose:
-                print(f"{lesson_name}: {training_pairs} exercises with generated choices", flush=True)
+        self.samples, self.lesson_names = load_samples(
+            llm, filenames, datapath, max_samples, multi_turn,
+            tools, use_tool_token, max_length, teacher_llm=teacher_llm)
         if verbose:
+            print(f"  {len(self.samples)} training pairs", flush=True)
             print("==== /StudentTeacherDataset ====", flush=True)
 
     def __len__(self):
@@ -155,66 +82,39 @@ class StudentTeacherDataset(torch.utils.data.Dataset):
         }
 
 
-class TeacherDataset(torch.utils.data.Dataset):
-    """
-    Dataset for teacher-only training (token loss).
+def build_distractor_dataset(distractor_dataset):
+    """Build distractor dataset for mixing with training data."""
+    from datasets import load_dataset
+    ds = load_dataset(distractor_dataset, split="train")
+    class DistractorSampler:
+        def __init__(self, texts, k=5):
+            self.texts = texts
+            self.k = k
+        def sample(self):
+            idxs = np.random.choice(len(self.texts), self.k, replace=False)
+            return [self.texts[i] for i in idxs]
+    return DistractorSampler([row["context"] for row in ds])
+
+
+class StudentDataset(torch.utils.data.Dataset):
+    """Dataset for SFT-only training (token loss, no teacher).
     Each sample is a prompt and single answer, optionally with distractor context.
     """
-    def __init__(
-        self,
-        llm,
-        filenames: List[str],
-        verbose: bool = False,
-        datapath: Path = DATA_PATH,
-        max_length: int = 0,
-        distractor_dataset: str = "",
-        tools: list = None,
-        use_tool_token: bool = False,
-        max_samples: int = 0,
-        multi_turn: bool = False,
-    ):
-        assert isinstance(filenames, list), "filenames should be a list"
-        self.samples: List[Dict[str, Any]] = []
-        self.lesson_names: List[str] = []
-
+    def __init__(self, llm, filenames, verbose=False, datapath=DATA_PATH,
+                 max_length=0, distractor_dataset="", tools=None,
+                 use_tool_token=False, max_samples=0, multi_turn=False):
         self.distractor_dataset = build_distractor_dataset(distractor_dataset) if distractor_dataset else None
-
-        for filename in filenames:
-            filepath = Path(datapath) / filename
-            ensure_path_exists(filepath)
-            lesson_name = os.path.splitext(os.path.basename(filename))[0]
-            self.lesson_names.append(lesson_name)
-            lesson_ix = len(self.lesson_names) - 1
-
-            exercises = read_exercises(filepath)
-            if max_samples:
-                exercises = _stratified_sample(exercises, n=max_samples)
-
-            for ex_i, exercise in enumerate(exercises):
-                date_str = exercise.metadata.get("date", "")
-                if multi_turn:
-                    from data.samples import build_multiturn_samples
-                    builder = build_multiturn_samples
-                else:
-                    from data.samples import build_singleturn_samples
-                    builder = build_singleturn_samples
-                samples = builder(
-                    exercise, llm, tools=tools,
-                    use_tool_token=use_tool_token, max_length=max_length,
-                    date_str=date_str)
-                for s in samples:
-                    s["prompt_tokens"] = s["student_open_prompt_tokens"]
-                    s["lesson_ix"] = lesson_ix
-                    if self.distractor_dataset:
-                        mat, q = extract_material_and_question(exercise)
-                        prompt_placeholder = llm.messages_to_prompt(exercise.messages, placeholder=True)
-                        s.update({"question": q, "material": mat, "prompt_placeholder": prompt_placeholder})
-                self.samples.extend(samples)
-
-            if verbose:
-                print(f"{lesson_name}: {len(self.samples)} exercises with answers", flush=True)
         if verbose:
-            print("==== /TeacherDataset ====", flush=True)
+            print("==== StudentDataset ====", flush=True)
+        self.samples, self.lesson_names = load_samples(
+            llm, filenames, datapath, max_samples, multi_turn,
+            tools, use_tool_token, max_length,
+            include_distractor_fields=bool(self.distractor_dataset))
+        for s in self.samples:
+            s["prompt_tokens"] = s["student_open_prompt_tokens"]
+        if verbose:
+            print(f"  {len(self.samples)} training pairs", flush=True)
+            print("==== /StudentDataset ====", flush=True)
 
     def __len__(self):
         return len(self.samples)

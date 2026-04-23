@@ -16,11 +16,11 @@ def compute_token_loss(
     reduction: Literal["batch", "sample"] = "batch",
 ) -> torch.Tensor:
     if closed_book:
-        inputs = batch['closed_book_seqs'][..., :-1]
-        labels = batch['closed_book_labels'][..., 1:]
+        inputs = batch.get('closed_book_seqs', batch.get('student_closed_seqs'))[..., :-1]
+        labels = batch.get('closed_book_labels', batch.get('student_closed_labels'))[..., 1:]
     else:
-        inputs = batch['open_book_seqs'][..., :-1]
-        labels = batch['open_book_labels'][..., 1:]
+        inputs = batch.get('open_book_seqs', batch.get('student_open_seqs'))[..., :-1]
+        labels = batch.get('open_book_labels', batch.get('student_open_labels'))[..., 1:]
 
     batch_size, seq_length = inputs.shape
     output_logits = model.forward(inputs).logits

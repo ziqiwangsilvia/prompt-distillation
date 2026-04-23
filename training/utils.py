@@ -102,7 +102,7 @@ def tokenize_teacher_student(material: str, question: str, llm: LLM, teacher_llm
     # Student open-book: material as system message (student tokenizer)
     saved = llm.opening_message
     llm.opening_message = Message(Role.SYSTEM, material) if material else None
-    student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools))
+    student_open_tokens = llm.tokenize(llm.messages_to_prompt([Message(Role.USER, question)], tools=student_tools, date_string=date_str))
     llm.opening_message = saved
 
     # Student closed-book: default system message with date in template

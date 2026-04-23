@@ -34,7 +34,7 @@ def main(args: AllArgs):
     # NOTE: teacher model loading is deferred to Trainer._init_models() so that
     # accelerator is initialized first and DeepSpeed can shard the teacher properly.
     teacher_llm = None
-    if args.logit_loss_weight and args.teacher not in {"student", "student_base"}:
+    if (args.distillation_type == "on_policy" or args.logit_loss_weight) and args.teacher not in {"student", "student_base"}:
         from models.configs import MODEL_CONFIGS
         from models.messages import Message, Role
         teacher_config = MODEL_CONFIGS[args.teacher]

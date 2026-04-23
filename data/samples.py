@@ -5,8 +5,7 @@ and teacher prompt/answer pairs. Tool calls are formatted in each model's native
 """
 import json
 
-from data.tool_call_format import format_tool_call, normalize_tool_call, to_native_format
-from data.dataset import prepare_answer_tokens
+from data.tool_call_format import format_tool_call, normalize_tool_call, to_native_format, prepare_answer_tokens
 from models.messages import Message, Role
 
 
@@ -105,7 +104,7 @@ def build_multiturn_samples(exercise, llm, teacher_llm=None, tools=None,
             teacher_ctx.append(Message(Role.from_value(m["role"]), content))
 
         student_tools = tools if use_tool_token else None
-        student_open_tokens = llm.tokenize(llm.messages_to_prompt(student_ctx, tools=student_tools))
+        student_open_tokens = llm.tokenize(llm.messages_to_prompt(student_ctx, tools=student_tools, date_string=date_str))
 
         # Closed-book: replace system prompt with default, keep chat history
         student_closed_ctx = [m for m in student_ctx if m.role != Role.SYSTEM]
@@ -129,3 +128,56 @@ def build_multiturn_samples(exercise, llm, teacher_llm=None, tools=None,
         })
 
     return samples
+
+
+def load_samples(llm, filenames, datapath, max_samples, multi_turn,
+                 tools, use_tool_token, max_length, teacher_llm=None,
+                 include_distractor_fields=False):
+    """Load exercises from files and build tokenized training samples.
+
+    Returns (samples, lesson_names).
+    """
+    import os
+    from pathlib import Path
+    from training.utils import read_exercises, ensure_path_exists, extract_question, extract_material_and_question
+
+    builder = build_multiturn_samples if multi_turn else build_singleturn_samples
+
+    def _stratified_sample(exercises, n=7):
+        tool, nlp = [], []
+        for ex in exercises:
+            if ex.answer_choices and ex.answer_choices[0].content.lstrip().startswith('{"'):
+                tool.append(ex)
+            else:
+                nlp.append(ex)
+        return tool[:n] + nlp[:n]
+
+    samples = []
+    lesson_names = []
+    for filename in filenames:
+        filepath = Path(datapath) / filename
+        ensure_path_exists(filepath)
+        lesson_name = os.path.splitext(os.path.basename(filename))[0]
+        lesson_names.append(lesson_name)
+        lesson_ix = len(lesson_names) - 1
+
+        exercises = read_exercises(filepath)
+        if max_samples:
+            exercises = _stratified_sample(exercises, n=max_samples)
+
+        for exercise in exercises:
+            date_str = exercise.metadata.get("date", "")
+            built = builder(
+                exercise, llm, teacher_llm=teacher_llm, tools=tools,
+                use_tool_token=use_tool_token, max_length=max_length,
+                date_str=date_str)
+            for s in built:
+                s["lesson_ix"] = lesson_ix
+                s["question"] = extract_question(exercise)
+                if include_distractor_fields:
+                    mat, q = extract_material_and_question(exercise)
+                    s["material"] = mat
+                    s["prompt_placeholder"] = llm.messages_to_prompt(exercise.messages, placeholder=True)
+            samples.extend(built)
+
+    return samples, lesson_names

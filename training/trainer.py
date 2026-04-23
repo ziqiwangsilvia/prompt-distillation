@@ -60,7 +60,7 @@ class Trainer:
         self.student, self.teacher, self.optimizer, self.projection = self._init_models()
 
         # Steps
-        if hp.logit_loss_weight or hp.distillation_type == "on_policy":
+        if hp.distillation_type == "on_policy" or hp.logit_loss_weight:
             self.n_batches = math.ceil(len(self.logit_train_ds) / hp.n_logit_micro_batches_per_batch / hp.logit_loss_micro_batch_size / hp.devices)
         else:
             self.n_batches = math.ceil(len(self.token_train_ds) / hp.n_token_micro_batches_per_batch / hp.token_loss_micro_batch_size / hp.devices)
@@ -134,7 +134,7 @@ class Trainer:
 
         teacher = None
         projection = None
-        if hp.logit_loss_weight or hp.distillation_type == "on_policy":
+        if hp.distillation_type == "on_policy" or hp.logit_loss_weight:
             if hp.teacher in {"student", "student_base"}:
                 teacher = hp.teacher
             else:
@@ -318,7 +318,7 @@ class Trainer:
         """
         from training.dpo import dpo_loss
         from training import IGNORE_INDEX
-        from data.dataset import prepare_answer_tokens
+        from data.tool_call_format import prepare_answer_tokens
         from data.tool_call_format import extract_tool_call, format_tool_call
 
         accelerator = self.accelerator

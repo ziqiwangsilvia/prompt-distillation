@@ -125,3 +125,20 @@ def convert_tool_call_format(text: str, source_family: str, target_family: str) 
 
     formatted = format_tool_call(tool_call, target_family)
     return text[:m.start()] + formatted + text[m.end():]
+
+
+def prepare_answer_tokens(llm, content: str, max_length: int, truncated: bool, use_tool_token: bool = False):
+    """Tokenize answer content and add EOS. Handles tool-call formatting for Llama."""
+    import torch
+    is_tool = use_tool_token and llm.model_family == "llama" and content.lstrip().startswith('{"name"')
+    if is_tool:
+        content = "<|python_tag|>" + content
+    tokens = llm.tokenize(content)
+    if is_tool:
+        eom_id = llm.tokenizer.convert_tokens_to_ids("<|eom_id|>")
+        tokens = torch.cat([tokens, torch.tensor([[eom_id]])], dim=1)
+    else:
+        tokens = llm.add_eos(tokens)
+    if max_length:
+        tokens = tokens[:, :max_length]
+    return tokens
