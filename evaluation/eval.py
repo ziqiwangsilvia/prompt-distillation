@@ -11,7 +11,7 @@ import json
 import re
 from pathlib import Path
 
-from data.paths import BASE_PATH
+from paths import BASE_PATH
 from models.llm import LLM
 from models.messages import Message, Role
 from training.utils import read_exercises, extract_question
@@ -41,7 +41,7 @@ def run_inference(
     # Load eval exercises
     custom_val = cfg.get("dataset", {}).get("custom_val_data", "")
     from models.configs import create_model_flags, get_model_config
-    from data.naming import generate_augmented_filename, generate_exam_name
+    from curriculum.naming import generate_augmented_filename, generate_exam_name
     if custom_val:
         eval_path = Path(custom_val)
     else:

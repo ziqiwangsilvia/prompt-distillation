@@ -9,7 +9,7 @@ from typing import Union, List, Optional, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 from .configs import get_model_config
-from data.paths import MODEL_PATH
+from paths import MODEL_PATH
 from .messages import Message, Role, merge_messages, QUESTION_PLACEHOLDER
 from models.utils import get_adapter_path
 
@@ -66,13 +66,13 @@ class LLM:
             "adapter_ids": [str(adapter_id) for adapter_id in self.adapter_ids],
         }
 
-    def messages_to_prompt(self, messages: List[Message], placeholder: bool = False, no_template: bool = False, tools: Optional[list] = None) -> str:
+    def messages_to_prompt(self, messages: List[Message], placeholder: bool = False, no_template: bool = False, tools: Optional[list] = None, date_string: str = "") -> str:
         if self.opening_message and not no_template:
             messages = [self.opening_message] + messages
         if no_template:
             return " ".join([m.content for m in messages])
         if self.model_family == "llama":
-            return self.llama_messages_to_prompt(messages, placeholder=placeholder, tools=tools)
+            return self.llama_messages_to_prompt(messages, placeholder=placeholder, tools=tools, date_string=date_string)
         elif self.model_family == "qwen":
             return self.qwen_messages_to_prompt(messages, placeholder=placeholder, tools=tools)
         raise ValueError(f"Unknown model family: {self.model_family}")
@@ -87,7 +87,7 @@ class LLM:
             kwargs["tools"] = tools
         return self.tokenizer.apply_chat_template(new_messages, **kwargs)
 
-    def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None) -> str:
+    def llama_messages_to_prompt(self, messages: List[Message], placeholder: bool = False, tools: Optional[list] = None, date_string: str = "") -> str:
         new_messages = []
         for i, msg in enumerate(messages):
             content = QUESTION_PLACEHOLDER if (placeholder and i == len(messages) - 1) else msg.content
@@ -95,6 +95,8 @@ class LLM:
         kwargs = {"tokenize": False, "add_generation_prompt": True}
         if tools:
             kwargs["tools"] = tools
+        if date_string:
+            kwargs["date_string"] = date_string
         return self.tokenizer.apply_chat_template(new_messages, **kwargs)
 
     def tokenize(self, seq: str) -> torch.Tensor:

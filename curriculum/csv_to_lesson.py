@@ -3,7 +3,7 @@ import csv
 import json
 import os
 
-from data.naming import generate_question_path, generate_lesson_name, generate_lesson_filename
+from curriculum.naming import generate_question_path, generate_lesson_name, generate_lesson_filename
 
 
 def remove_nul_characters(filename: str) -> str:
