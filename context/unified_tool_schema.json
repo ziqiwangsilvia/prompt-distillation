@@ -1,0 +1,122 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "visualise_data",
+      "description": "Visualise financial data as a chart. Supports spending, income, and cash flow. Can group by category, payee, or month, and compare across two time periods. The frontend determines the best chart type based on the data.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "description": "The data metric to visualise.",
+            "enum": [
+              "spending",
+              "income",
+              "cash_flow"
+            ],
+            "type": "string"
+          },
+          "time_period": {
+            "description": "Flexible time period specification.",
+            "properties": {
+              "last_n_months": {
+                "default": null,
+                "description": "Query the last N complete calendar months (excluding current month). e.g. last_n_months: 1 = last month, last_n_months: 6 = last 6 months.",
+                "minimum": 1,
+                "type": "integer",
+                "nullable": true
+              },
+              "from_date": {
+                "default": null,
+                "description": "Start date (YYYY-MM-DD). Use for the current month (1st of this month), current year (Jan 1st), or any specific date range. Includes up to today unless to_date is set.",
+                "type": "string",
+                "nullable": true
+              },
+              "to_date": {
+                "default": null,
+                "description": "End date (YYYY-MM-DD), inclusive. Defaults to today if omitted. Only use with from_date.",
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "type": "object"
+          },
+          "compare_with": {
+            "default": null,
+            "description": "Flexible time period specification.",
+            "properties": {
+              "last_n_months": {
+                "default": null,
+                "description": "Query the last N complete calendar months (excluding current month). e.g. last_n_months: 1 = last month, last_n_months: 6 = last 6 months.",
+                "minimum": 1,
+                "type": "integer",
+                "nullable": true
+              },
+              "from_date": {
+                "default": null,
+                "description": "Start date (YYYY-MM-DD). Use for the current month (1st of this month), current year (Jan 1st), or any specific date range. Includes up to today unless to_date is set.",
+                "type": "string",
+                "nullable": true
+              },
+              "to_date": {
+                "default": null,
+                "description": "End date (YYYY-MM-DD), inclusive. Defaults to today if omitted. Only use with from_date.",
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "type": "object",
+            "nullable": true
+          },
+          "group_by": {
+            "description": "How to group/break down the data. Use 'category' or 'payee' for entity breakdowns, 'month' for time series. Combine e.g. ['category', 'month'] for a monthly breakdown by category.",
+            "items": {
+              "enum": [
+                "category",
+                "payee",
+                "month"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "filter": {
+            "default": null,
+            "description": "Narrow to specific categories or payees. Does not break down the data \u2014 use group_by for that.",
+            "properties": {
+              "categories": {
+                "default": null,
+                "description": "Category names to filter by",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "nullable": true
+              },
+              "payees": {
+                "default": null,
+                "description": "Payee names to filter by",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "nullable": true
+              }
+            },
+            "type": "object",
+            "nullable": true
+          },
+          "chart_title": {
+            "description": "Short title summarising what the chart shows. Always generate one \u2014 never ask the user.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "time_period",
+          "chart_title"
+        ]
+      }
+    }
+  }
+]

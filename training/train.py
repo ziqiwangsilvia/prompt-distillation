@@ -29,6 +29,8 @@ def main(args: AllArgs):
         raise NotImplementedError("Distractors only tested for LLama3 models. If you want to use distractors for Qwen, comment out this line and make sure that the outputs are reasonable.")
 
     base_llm = LLM(args.base, opening_message=args.opening_message)
+    if args.knowledge_cutoff != "default":
+        base_llm.set_knowledge_cutoff(args.knowledge_cutoff)
 
     # Create teacher LLM for tokenization if using a separate teacher model
     # NOTE: teacher model loading is deferred to Trainer._init_models() so that

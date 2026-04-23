@@ -4,7 +4,7 @@ project:
   train_only: true
   use_wandb: false
   system_prompt_path: context/financial_system_prompt_notool_qwen.txt
-  tools_schema_path: context/financial_tools_schema_20260401.json
+  tools_schema_path: context/unified_tool_schema.json
 models:
   teacher: qwen2.5-72b-instruct
   student: llama3.1-8b-instruct
@@ -13,8 +13,8 @@ dataset:
   name: tool_calling
   variant: default
   datapath: output/teacher_answers
-  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/train.json
-  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp_tool_summary/val.json
+  custom_train_data: /fsx/shared/processed-data/llms/distillation/mvp_unified_tool/train.json
+  custom_val_data: /fsx/shared/processed-data/llms/distillation/mvp_unified_tool/val.json
   distractor_dataset: ''
   partition_idx: null
   partition_type: null
@@ -64,6 +64,7 @@ training:
   reverse_kl: false
   vocab_mapping: topk
   n_topk: 100
+  knowledge_cutoff: null
   warmup_ratio: 0.1
   warmup_steps: null
   weight_decay: 0.1

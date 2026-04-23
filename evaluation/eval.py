@@ -57,8 +57,9 @@ def run_inference(
     exercises = read_exercises(eval_path)
     test_mode = cfg.get("training", {}).get("test_mode", False)
     if test_mode:
-        tool_ex = [e for e in exercises if e.answer_choices and e.answer_choices[0].content.lstrip().startswith('{"')]
-        nlp_ex = [e for e in exercises if not e.answer_choices or not e.answer_choices[0].content.lstrip().startswith('{"')]
+        from data.dataset import _is_tool_exercise
+        tool_ex = [e for e in exercises if _is_tool_exercise(e)]
+        nlp_ex = [e for e in exercises if not _is_tool_exercise(e)]
         exercises = tool_ex[:7] + nlp_ex[:7]
     print(f"Loaded {len(exercises)} eval exercises")
 
@@ -76,6 +77,9 @@ def run_inference(
         # Build prompts
         student_cfg = get_model_config(student_base)
         llm = LLM(student_base, opening_message=Message(Role.SYSTEM, student_cfg.system_message))
+        knowledge_cutoff = cfg.get("training", {}).get("knowledge_cutoff", "default")
+        if knowledge_cutoff != "default":
+            llm.set_knowledge_cutoff(knowledge_cutoff)
 
         tools = None
         if cfg.get("training", {}).get("use_tool_token", False):
@@ -91,9 +95,25 @@ def run_inference(
         for ex in exercises:
             student_content = extract_question(ex)
             questions.append(student_content)
-            refs.append(ex.answer_choices[0].content if ex.answer_choices else None)
+            if ex.answer_choices:
+                refs.append(ex.answer_choices[0].content)
+            else:
+                # Multi-turn: first assistant message is the reference
+                ref = None
+                for m in ex.messages:
+                    if m.role.value == "assistant":
+                        d = m.to_dict()
+                        if "tool_calls" in d:
+                            tc = d["tool_calls"][0]
+                            func = tc if "name" in tc else tc.get("function", tc)
+                            ref = json.dumps({"name": func["name"], "parameters": func.get("arguments", func.get("parameters", {}))})
+                        else:
+                            ref = m.content
+                        break
+                refs.append(ref)
             msgs = [Message(Role.USER, student_content)]
-            prompts.append(llm.messages_to_prompt(msgs, tools=tools))
+            date_str = ex.metadata.get("date", "")
+            prompts.append(llm.messages_to_prompt(msgs, tools=tools, date_string=date_str))
 
         # Run inference
         if vllm_host:
@@ -133,11 +153,9 @@ def run_inference(
         get_variable_parsing_and_hallucination, get_exact_match,
     )
 
-    AVAILABLE_TOOLS = ["show_pie_chart", "show_stacked_bar_chart", "show_line_chart"]
+    AVAILABLE_TOOLS = ["visualise_data"]
     TOOL_SCHEMAS = {
-        "show_pie_chart": {"properties": {"data_type": {}, "time_range": {}, "group_by": {}, "categories": {}, "payees": {}, "limit": {}}},
-        "show_stacked_bar_chart": {"properties": {"data_type": {}, "time_range": {}, "group_by": {}, "categories": {}, "payees": {}, "limit": {}}},
-        "show_line_chart": {"properties": {"chart_type": {}, "time_range": {}}},
+        "visualise_data": {"properties": {"metric": {}, "time_period": {}, "compare_with": {}, "group_by": {}, "filter": {}, "chart_title": {}}},
     }
 
     def _to_metric_format(text):
