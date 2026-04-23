@@ -142,11 +142,12 @@ def _forward_teacher(teacher, teacher_context, batch, accelerator=None):
         # Scatter: rank 0 sends each rank its logits
         my_rank = accelerator.process_index
         my_seq_len = inputs.shape[1]
-        my_logits = torch.zeros(inputs.shape[0], my_seq_len, vocab_size, dtype=torch.bfloat16, device=device)
+        logit_dtype = all_logits[0].dtype if all_logits is not None else torch.bfloat16
+        my_logits = torch.zeros(inputs.shape[0], my_seq_len, vocab_size, dtype=logit_dtype, device=device)
 
         for r in range(accelerator.num_processes):
             sl = all_seq_lens[r].item()
-            buf = torch.zeros(inputs.shape[0], sl, vocab_size, dtype=torch.bfloat16, device=device)
+            buf = torch.zeros(inputs.shape[0], sl, vocab_size, dtype=logit_dtype, device=device)
             if all_logits is not None:
                 buf.copy_(all_logits[r])
             dist.broadcast(buf, src=0)

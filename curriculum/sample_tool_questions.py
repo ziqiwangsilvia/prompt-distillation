@@ -19,7 +19,7 @@ from typing import Dict, List
 
 from openai import AsyncOpenAI
 
-from data.naming import generate_question_path
+from curriculum.naming import generate_question_path
 from models.llm import LLM
 from models.messages import Message, Role
 from models.configs import get_model_config

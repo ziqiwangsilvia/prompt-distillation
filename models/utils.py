@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from vllm import SamplingParams
 
-from data.paths import BASE_PATH, ADAPTER_PATH
+from paths import BASE_PATH, ADAPTER_PATH
 
 
 def generate_extra_body(base: str) -> Dict[str, Any]:
