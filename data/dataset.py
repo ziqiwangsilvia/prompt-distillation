@@ -14,14 +14,21 @@ from training import IGNORE_INDEX
 from training.utils import tokenize_teacher_student, read_exercises, ensure_path_exists, extract_question, extract_material_and_question
 
 
+def _is_tool_exercise(ex):
+    """Check if exercise is a tool-call exercise."""
+    if ex.answer_choices:
+        return ex.answer_choices[0].content.lstrip().startswith('{"')
+    for m in ex.messages:
+        if m.role.value == "assistant":
+            d = m.to_dict()
+            return "tool_calls" in d or m.content.lstrip().startswith('{"')
+    return False
+
+
 def _stratified_sample(exercises, n=7):
     """Pick n tool-call and n NLP exercises based on ground truth."""
-    tool, nlp = [], []
-    for ex in exercises:
-        if ex.answer_choices and ex.answer_choices[0].content.lstrip().startswith('{"'):
-            tool.append(ex)
-        else:
-            nlp.append(ex)
+    tool = [ex for ex in exercises if _is_tool_exercise(ex)]
+    nlp = [ex for ex in exercises if not _is_tool_exercise(ex)]
     return tool[:n] + nlp[:n]
 
 DISTRACTOR_PROB = 0.6

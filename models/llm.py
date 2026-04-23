@@ -55,6 +55,20 @@ class LLM:
         self.adapter_ids = [get_adapter_path(aid) for aid in (adapter_ids or [])]
         self.opening_message = opening_message
 
+    def set_knowledge_cutoff(self, date_str):
+        """Override or remove the Cutting Knowledge Date in the Llama chat template.
+        date_str=None removes it, date_str='2026-06-30' overrides it.
+        """
+        if self.model_family != "llama":
+            return
+        if date_str is None:
+            self.tokenizer.chat_template = self.tokenizer.chat_template.replace(
+                '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', '')
+        else:
+            self.tokenizer.chat_template = self.tokenizer.chat_template.replace(
+                'Cutting Knowledge Date: December 2023',
+                f'Cutting Knowledge Date: {date_str}')
+
     @classmethod
     def from_adapter(cls, adapter_id: str, opening_message: Optional[Message] = None):
         model_id, adapter_ids = get_adapter_chain(adapter_id)

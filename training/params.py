@@ -16,6 +16,7 @@ class StudentArgs:
     lora_r: int = 1024
     mixed_precision: str = "bf16"
     closed_book: bool = True
+    knowledge_cutoff: str = "default"  # "default" keeps original, null removes it, any string overrides it
     # Computed in __post_init__
     peft_config: LoraConfig = field(init=False, default=None)
     opening_message: Message = field(init=False, default=None)
