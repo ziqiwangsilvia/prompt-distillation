@@ -10,10 +10,9 @@ from data.dataset import prepare_answer_tokens
 from models.messages import Message, Role
 
 
-def _format_assistant_content(msg_dict, model_family, use_tool_token=False):
+def _format_assistant_content(msg_dict, model_family):
     """Format an assistant message's content for a specific model family.
-    Handles tool_calls by converting to native format.
-    If use_tool_token, adds <|python_tag|> prefix for llama tool calls."""
+    Handles tool_calls by converting to native format."""
     if "tool_calls" in msg_dict:
         tc = msg_dict["tool_calls"][0]
         func = tc if "name" in tc else tc.get("function", tc)
@@ -21,10 +20,7 @@ def _format_assistant_content(msg_dict, model_family, use_tool_token=False):
         args = func.get("arguments", func.get("parameters", {}))
         if isinstance(args, str):
             args = json.loads(args)
-        text = format_tool_call({"name": name, "arguments": args}, model_family)
-        if use_tool_token and model_family == "llama":
-            text = "<|python_tag|>" + text
-        return text
+        return format_tool_call({"name": name, "arguments": args}, model_family)
     return msg_dict.get("content", "")
 
 
@@ -94,7 +90,7 @@ def build_multiturn_samples(exercise, llm, teacher_llm=None, tools=None,
         student_ctx = []
         for m in context:
             if m["role"] == "assistant" and "tool_calls" in m:
-                content = _format_assistant_content(m, llm.model_family, use_tool_token=use_tool_token)
+                content = _format_assistant_content(m, llm.model_family)
             else:
                 content = m.get("content", "")
             student_ctx.append(Message(Role.from_value(m["role"]), content))
@@ -109,15 +105,11 @@ def build_multiturn_samples(exercise, llm, teacher_llm=None, tools=None,
             teacher_ctx.append(Message(Role.from_value(m["role"]), content))
 
         student_tools = tools if use_tool_token else None
+        student_open_tokens = llm.tokenize(llm.messages_to_prompt(student_ctx, tools=student_tools))
+
+        # Closed-book: replace system prompt with default, keep chat history
         student_closed_ctx = [m for m in student_ctx if m.role != Role.SYSTEM]
-        student_open_prompt = llm.messages_to_prompt(student_ctx, tools=student_tools)
-        student_closed_prompt = llm.messages_to_prompt(student_closed_ctx, tools=student_tools, date_string=date_str)
-        if use_tool_token and llm.model_family == "llama":
-            import re
-            student_open_prompt = re.sub(r'(<\|python_tag\|>[^<]*)<\|eot_id\|>', r'\1<|eom_id|>', student_open_prompt)
-            student_closed_prompt = re.sub(r'(<\|python_tag\|>[^<]*)<\|eot_id\|>', r'\1<|eom_id|>', student_closed_prompt)
-        student_open_tokens = llm.tokenize(student_open_prompt)
-        student_closed_tokens = llm.tokenize(student_closed_prompt)
+        student_closed_tokens = llm.tokenize(llm.messages_to_prompt(student_closed_ctx, tools=student_tools, date_string=date_str))
 
         teacher_tokens = t_llm.tokenize(t_llm.messages_to_prompt(teacher_ctx, tools=tools))
 
