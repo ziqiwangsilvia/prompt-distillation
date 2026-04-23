@@ -51,6 +51,10 @@ class LLM:
         self.llama_eot_token = None
         if self.model_family == "llama":
             self.llama_eot_token = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+            # Use vLLM's tool-calling template for consistency with inference
+            template_path = Path(__file__).parent.parent / "context" / "llama3_tool_template.jinja"
+            if template_path.exists():
+                self.tokenizer.chat_template = template_path.read_text()
 
         self.adapter_ids = [get_adapter_path(aid) for aid in (adapter_ids or [])]
         self.opening_message = opening_message
