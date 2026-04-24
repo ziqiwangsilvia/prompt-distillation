@@ -62,6 +62,7 @@ training:
   logit_loss_weight: 0
   train_temperature: 2
   knowledge_cutoff: null
+  chat_template_path: ""
   reverse_kl: false
   warmup_ratio: 0.1
   warmup_steps: null

@@ -73,6 +73,7 @@ training:
   vocab_mapping: topk
   n_topk: 100
   knowledge_cutoff: null
+  chat_template_path: ""
   warmup_ratio: 0.1
   warmup_steps: null
   weight_decay: 0.1
