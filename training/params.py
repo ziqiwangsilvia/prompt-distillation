@@ -17,6 +17,7 @@ class StudentArgs:
     mixed_precision: str = "bf16"
     closed_book: bool = True
     knowledge_cutoff: str = "default"  # "default" keeps original, null removes it, any string overrides it
+    chat_template_path: str = ""  # path to custom jinja template, empty uses HF default
     # Computed in __post_init__
     peft_config: LoraConfig = field(init=False, default=None)
     opening_message: Message = field(init=False, default=None)
