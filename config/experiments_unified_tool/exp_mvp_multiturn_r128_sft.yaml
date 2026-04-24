@@ -1,5 +1,5 @@
 project:
-  run_name: vllm_unified_tool_r128_sft
+  run_name: hf_unified_tool_r128_sft
   group_name: null
   train_only: true
   use_wandb: false

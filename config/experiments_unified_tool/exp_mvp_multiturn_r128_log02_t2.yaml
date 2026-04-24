@@ -1,5 +1,5 @@
 project:
-  run_name: vllm_unified_tool_r128_log02_t2
+  run_name: hf_unified_tool_r128_log02_t2
   group_name: null
   train_only: true
   use_wandb: false
